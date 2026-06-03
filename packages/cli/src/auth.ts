@@ -26,7 +26,8 @@ function apiBaseUrl(): string {
  */
 async function finishWithKey(apiKey: string): Promise<never> {
   try {
-    const api = new AluviaApi({ apiKey });
+    // Verify against the same API host the key came from (defaults to prod).
+    const api = new AluviaApi({ apiKey, apiBaseUrl: `${apiBaseUrl()}/v1` });
     const account = await api.account.get();
     saveApiKey(apiKey);
     return output({ status: 'authenticated', configPath: configPath(), account });
