@@ -203,7 +203,9 @@ async function runLogin(noBrowser: boolean): Promise<never> {
     return output({ error: `Could not start local authentication server: ${(err as Error).message}` }, 1);
   }
 
-  const authUrl = `${dashboard}/cli-auth?port=${port}&state=${state}`;
+  // NOTE: use `cli_state` (not `state`) — `state` is a reserved OAuth param that
+  // the dashboard's auth tooling strips from the URL on load.
+  const authUrl = `${dashboard}/cli-auth?port=${port}&cli_state=${state}`;
 
   console.error('Authenticate with Aluvia by opening this link in your browser:\n');
   console.error(`  ${authUrl}\n`);
