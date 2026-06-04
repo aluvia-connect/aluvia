@@ -18,7 +18,7 @@ A complete reference for all configuration options across the Aluvia SDK — con
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ALUVIA_API_KEY` | Yes (CLI) | — | Your Aluvia account API key. Required by all CLI commands and the MCP server. For programmatic usage, pass `apiKey` directly to the constructor instead. |
+| `ALUVIA_API_KEY` | No (CLI) | — | Optional override for your account API key. The CLI falls back to the key stored by `aluvia auth` in `~/.aluvia/config.json`. For programmatic usage, pass `apiKey` directly to the constructor. |
 
 ---
 

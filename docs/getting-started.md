@@ -33,7 +33,13 @@ npm install @aluvia/sdk playwright
 
 ## Configuration
 
-Set your API key as an environment variable:
+**CLI (recommended):** log in once and store your key locally:
+
+```bash
+aluvia auth
+```
+
+**Or set an API key as an environment variable** (common for CI and scripts):
 
 ```bash
 export ALUVIA_API_KEY="your-api-key"
@@ -45,13 +51,25 @@ Or create a `.env` file in your project root:
 ALUVIA_API_KEY=your-api-key
 ```
 
-The SDK reads `ALUVIA_API_KEY` from the environment in CLI mode. In programmatic mode, pass the key directly to the constructor.
+The CLI uses `ALUVIA_API_KEY` when set; otherwise it reads the key from `~/.aluvia/config.json` after `aluvia auth`. In programmatic mode, pass the key directly to the constructor.
 
 ---
 
 ## Quick start: CLI
 
 The CLI is the fastest way to get started. It outputs JSON to stdout, making it ideal for AI agent frameworks.
+
+### 0. Authenticate
+
+```bash
+aluvia auth
+```
+
+Open the printed link in any browser and confirm the code. Then verify:
+
+```bash
+aluvia auth status
+```
 
 ### 1. Launch a browser session
 

@@ -10,28 +10,16 @@ npm install -g @aluvia/cli
 
 ## Authentication
 
-The quickest way to authenticate is:
-
 ```bash
 aluvia auth
 ```
 
-This prints a link (and opens your browser). Sign in to the [Aluvia dashboard](https://dashboard.aluvia.io) — or, if you're already signed in, you're authenticated instantly — and the CLI automatically retrieves and stores your API key in `~/.aluvia/config.json`. Then close the browser tab; you're done.
+Open the link it prints, confirm the code, and you're done. Your API key is saved to `~/.aluvia/config.json`.
 
 ```bash
-aluvia auth status   # check whether you're authenticated (never prints the key)
+aluvia auth status   # check whether you're authenticated
 aluvia auth logout   # remove the stored API key
 ```
-
-Use `aluvia auth --no-browser` to only print the link (useful over SSH).
-
-**Headless / remote machines:** the default flow needs the browser and CLI on the same machine. On a headless box (SSH, container, CI with a browser elsewhere), use the device-code flow instead:
-
-```bash
-aluvia auth --device
-```
-
-This prints a short code and a link; open the link in any browser, confirm the code matches, and the CLI receives the key by polling the API — no local callback needed. Override the API URL with `ALUVIA_API_URL` for dev/staging.
 
 ### Using an environment variable instead
 
@@ -210,8 +198,8 @@ See the [SDK Documentation](../sdk/README.md) for more details.
 
 ## Troubleshooting
 
-- **"No API key found"**: Run `aluvia auth` to log in via the browser, or export `ALUVIA_API_KEY` in your shell.
-- **`aluvia auth` times out or the browser never opens**: Use `aluvia auth --no-browser` and open the printed link manually. The flow needs the browser and CLI on the same machine (the dashboard delivers the key to a local `127.0.0.1` callback).
+- **"No API key found"**: Run `aluvia auth` to log in, or export `ALUVIA_API_KEY` in your shell.
+- **`aluvia auth` times out**: Open the printed link in a browser and confirm the code matches.
 - **"Browser process exited unexpectedly"**: The daemon failed to start. Check if Chrome/Chromium is installed or if there are port conflicts.
 - **"Invalid session name"**: Session names must contain only letters, numbers, hyphens, and underscores.
 

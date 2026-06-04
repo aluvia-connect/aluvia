@@ -31,7 +31,7 @@ function printHelp(toStderr = false): void {
   log('  aluvia account                              Show account info');
   log('  aluvia account usage [options]              Show usage stats');
   log('  aluvia geos                                 List available geos\n');
-  log('  aluvia auth                                 Log in via browser and store your API key');
+  log('  aluvia auth                                 Log in and store your API key');
   log('  aluvia auth status                          Show whether you are authenticated');
   log('  aluvia auth logout                          Remove the stored API key');
   log('  aluvia help [--json]                        Show this help\n');
@@ -56,13 +56,8 @@ function printHelp(toStderr = false): void {
   log('Account usage options:');
   log('  --start <ISO8601>          Start date filter');
   log('  --end <ISO8601>            End date filter\n');
-  log('Auth:');
-  log('  --device                   Use the device-code flow (no local browser needed)');
-  log('  --no-browser               Print the auth link instead of opening a browser\n');
   log('Environment:');
-  log('  ALUVIA_API_KEY        Your Aluvia API key. Takes precedence over `aluvia auth`.');
-  log('  ALUVIA_DASHBOARD_URL  Override the dashboard URL used by `aluvia auth` (dev/staging).');
-  log('  ALUVIA_API_URL        Override the API URL used by `aluvia auth --device` (dev/staging).\n');
+  log('  ALUVIA_API_KEY        Optional. Takes precedence over the key stored by `aluvia auth`.\n');
   log('Output:');
   log('  All commands output JSON to stdout.');
 }
@@ -178,17 +173,8 @@ function printHelpJson(): never {
       },
       {
         command: 'auth',
-        description: 'Log in via browser and store your API key',
-        options: [
-          {
-            flag: '--device',
-            description: 'Use the device-code flow (no local browser needed)',
-          },
-          {
-            flag: '--no-browser',
-            description: 'Print the auth link instead of opening a browser',
-          },
-        ],
+        description: 'Log in and store your API key (open the printed link in any browser)',
+        options: [],
       },
       {
         command: 'auth status',

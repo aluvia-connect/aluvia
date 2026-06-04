@@ -18,6 +18,9 @@ A comprehensive reference for the Aluvia CLI — a JSON-output command-line inte
   - [account](#account)
   - [account usage](#account-usage)
   - [geos](#geos)
+  - [auth](#auth)
+  - [auth status](#auth-status)
+  - [auth logout](#auth-logout)
   - [help](#help)
 - [Connecting to a running browser](#connecting-to-a-running-browser)
   - [Using --run](#using---run)
@@ -48,7 +51,7 @@ Both point to the same entry point. All commands output JSON to stdout and use e
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ALUVIA_API_KEY` | Yes | Your Aluvia account API key. Required for all commands. |
+| `ALUVIA_API_KEY` | No | Optional override for your Aluvia account API key. If unset, the CLI uses the key stored by `aluvia auth` in `~/.aluvia/config.json`. |
 
 ---
 
@@ -60,7 +63,15 @@ npm install @aluvia/sdk playwright
 
 Requires Node.js 18+. The `playwright` dependency is required for browser session commands.
 
-Set your API key:
+**Authenticate (recommended for headless/remote servers):**
+
+```bash
+aluvia auth
+```
+
+This prints a link and confirmation code to stderr. Open the link in any browser, approve the code, and the CLI stores your API key in `~/.aluvia/config.json`.
+
+**Or set an API key directly (CI/scripts):**
 
 ```bash
 export ALUVIA_API_KEY="your-api-key"
@@ -197,7 +208,7 @@ Missing URL:
 
 Missing API key:
 ```json
-{ "error": "ALUVIA_API_KEY environment variable is required." }
+{ "error": "No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY." }
 ```
 
 **Examples:**
@@ -668,6 +679,85 @@ aluvia geos
 
 ---
 
+### `auth`
+
+Logs in via the device-code flow and stores your API key in `~/.aluvia/config.json`. Designed for headless and remote servers: the CLI polls the API while you approve in any browser.
+
+```bash
+aluvia auth
+```
+
+**stderr (instructions):**
+
+```
+Authenticate with Aluvia:
+
+  1. Open: https://dashboard.aluvia.io/...
+  2. Confirm this code matches: XXXX-XXXX
+```
+
+**stdout on success:**
+
+```json
+{
+  "status": "authenticated",
+  "message": "API key saved successfully. Run `aluvia account` to view account details."
+}
+```
+
+---
+
+### `auth status`
+
+Checks whether a key is available. Never prints the key.
+
+```bash
+aluvia auth status
+```
+
+**Output (authenticated via stored config):**
+
+```json
+{
+  "authenticated": true,
+  "source": "config",
+  "configFile": "~/.aluvia/config.json"
+}
+```
+
+**Output (authenticated via env var):**
+
+```json
+{ "authenticated": true, "source": "env" }
+```
+
+**Output (not authenticated):**
+
+```json
+{ "authenticated": false }
+```
+
+---
+
+### `auth logout`
+
+Removes the stored API key from `~/.aluvia/config.json`.
+
+```bash
+aluvia auth logout
+```
+
+**Output:**
+
+```json
+{
+  "status": "logged_out",
+  "configFile": "~/.aluvia/config.json"
+}
+```
+
+---
+
 ### `help`
 
 Displays help text. Plain text by default, or structured JSON with `--json`.
@@ -1001,7 +1091,7 @@ All errors produce JSON output to stdout with exit code 1.
 
 | Error | When |
 |-------|------|
-| `ALUVIA_API_KEY environment variable is required.` | API key not set. |
+| `No API key found. Run \`aluvia auth\` to log in, or set ALUVIA_API_KEY.` | API key not set (no env var and no stored config). |
 | `URL is required. Usage: aluvia session start <url> [options]` | Missing URL argument for `session start`. |
 | `Invalid --connection-id: '...' must be a positive integer.` | Bad connection ID value. |
 | `Invalid session name. Use only letters, numbers, hyphens, and underscores.` | Invalid characters in `--browser-session`. |
@@ -1015,6 +1105,7 @@ All errors produce JSON output to stdout with exit code 1.
 | `Unknown command: '...'. Run "aluvia help" for usage.` | Unrecognized command. |
 | `Unknown session subcommand: '...'. Run "aluvia help" for usage.` | Unrecognized session subcommand. |
 | `Unknown account subcommand: '...'.` | Unrecognized account subcommand. |
+| `Unknown auth subcommand: '...'.` | Unrecognized auth subcommand. |
 
 API errors from the Aluvia REST API are caught and output as `{ "error": "<message>" }` with the API error message.
 

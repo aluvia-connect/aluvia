@@ -284,11 +284,12 @@ Some errors include additional context:
 
 ## Common errors and troubleshooting
 
-### `ALUVIA_API_KEY environment variable is required.`
+### `No API key found. Run \`aluvia auth\` to log in, or set ALUVIA_API_KEY.`
 
-**Context:** CLI commands
+**Context:** CLI commands (and MCP tools that wrap the CLI)
 
-**Fix:** Set the environment variable:
+**Fix:** Run `aluvia auth` on the machine running the CLI, or set the environment variable:
+
 ```bash
 export ALUVIA_API_KEY="your-api-key"
 ```
