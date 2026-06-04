@@ -1,15 +1,26 @@
 import { AluviaApi, readLock, listSessions, isProcessAlive, removeLock, toLockData } from '@aluvia/sdk';
 import type { LockData } from '@aluvia/sdk';
 import { output } from './cli.js';
+import { getStoredApiKey } from './config.js';
 
 /**
- * Create an AluviaApi instance from ALUVIA_API_KEY env var.
- * Calls output() and exits if the key is missing.
+ * Resolve the API key from the ALUVIA_API_KEY env var, falling back to the key
+ * stored by `aluvia auth` (~/.aluvia/config.json). The env var always wins.
+ */
+export function resolveApiKey(): string | undefined {
+  const envKey = (process.env.ALUVIA_API_KEY ?? '').trim();
+  if (envKey) return envKey;
+  return getStoredApiKey();
+}
+
+/**
+ * Create an AluviaApi instance from the resolved API key.
+ * Calls output() and exits if no key is available.
  */
 export function requireApi(): AluviaApi {
-  const apiKey = (process.env.ALUVIA_API_KEY ?? '').trim();
+  const apiKey = resolveApiKey();
   if (!apiKey) {
-    return output({ error: 'ALUVIA_API_KEY environment variable is required.' }, 1);
+    return output({ error: 'No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.' }, 1);
   }
   return new AluviaApi({ apiKey });
 }

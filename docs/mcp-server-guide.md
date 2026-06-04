@@ -477,7 +477,7 @@ When a tool call fails, the response has `isError: true` and the content contain
   "content": [
     {
       "type": "text",
-      "text": "{\n  \"error\": \"ALUVIA_API_KEY environment variable is required.\"\n}"
+      "text": "{\n  \"error\": \"No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.\"\n}"
     }
   ],
   "isError": true
@@ -488,7 +488,7 @@ Common errors:
 
 | Error | Cause |
 |-------|-------|
-| `ALUVIA_API_KEY environment variable is required.` | API key not set in environment |
+| `No API key found. Run \`aluvia auth\` to log in, or set ALUVIA_API_KEY.` | No env var and no key from `aluvia auth` (MCP uses the CLI credential resolver) |
 | `URL is required.` | `session_start` called without `url` parameter |
 | `No running browser sessions found.` | No active sessions for `session_close`/`session_get` etc. |
 | `Multiple sessions running. Specify --browser-session <name>.` | Ambiguous session target when multiple sessions exist |

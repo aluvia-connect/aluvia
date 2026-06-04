@@ -4,6 +4,7 @@ import { handleOpenDaemon } from './open.js';
 import { handleSession, parseSessionArgs } from './session.js';
 import type { ParsedSessionArgs } from './session.js';
 import { handleAccount } from './account.js';
+import { handleAuth } from './auth.js';
 import { handleGeos } from './geos.js';
 import { validateSessionName } from '@aluvia/sdk';
 import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
@@ -29,7 +30,10 @@ function printHelp(toStderr = false): void {
   log('  aluvia session set-rules <rules> [options]  Set routing rules on a running session\n');
   log('  aluvia account                              Show account info');
   log('  aluvia account usage [options]              Show usage stats');
-  log('  aluvia geos                                 List available geos');
+  log('  aluvia geos                                 List available geos\n');
+  log('  aluvia auth                                 Log in and store your API key');
+  log('  aluvia auth status                          Show whether you are authenticated');
+  log('  aluvia auth logout                          Remove the stored API key');
   log('  aluvia help [--json]                        Show this help\n');
   log('Session start options:');
   log('  --connection-id <id>       Use a specific connection ID');
@@ -53,7 +57,7 @@ function printHelp(toStderr = false): void {
   log('  --start <ISO8601>          Start date filter');
   log('  --end <ISO8601>            End date filter\n');
   log('Environment:');
-  log('  ALUVIA_API_KEY   Required. Your Aluvia API key.\n');
+  log('  ALUVIA_API_KEY        Optional. Takes precedence over the key stored by `aluvia auth`.\n');
   log('Output:');
   log('  All commands output JSON to stdout.');
 }
@@ -168,6 +172,21 @@ function printHelpJson(): never {
         options: [],
       },
       {
+        command: 'auth',
+        description: 'Log in and store your API key (open the printed link in any browser)',
+        options: [],
+      },
+      {
+        command: 'auth status',
+        description: 'Show whether you are authenticated (does not print the key)',
+        options: [],
+      },
+      {
+        command: 'auth logout',
+        description: 'Remove the stored API key',
+        options: [],
+      },
+      {
         command: 'help',
         description: 'Show this help',
         options: [{ flag: '--json', description: 'Output help as JSON' }],
@@ -230,6 +249,9 @@ async function main(): Promise<void> {
   } else if (command === 'account') {
     if (wantsHelp) printHelpAndExit(args);
     await handleAccount(args.slice(1));
+  } else if (command === 'auth') {
+    if (wantsHelp) printHelpAndExit(args);
+    await handleAuth(args.slice(1));
   } else if (command === 'geos') {
     if (wantsHelp) printHelpAndExit(args);
     await handleGeos();

@@ -10,6 +10,7 @@ import {
 } from '@aluvia/sdk';
 import type { LockDetection, BlockDetectionResult } from '@aluvia/sdk';
 import { output } from './cli.js';
+import { resolveApiKey } from './api-helpers.js';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -92,10 +93,10 @@ export function handleOpen({
     removeLock(session);
   }
 
-  // Require API key
-  const apiKey = process.env.ALUVIA_API_KEY;
+  // Require API key (env var, falling back to the key stored by `aluvia auth`)
+  const apiKey = resolveApiKey();
   if (!apiKey) {
-    output({ error: 'ALUVIA_API_KEY environment variable is required.' }, 1);
+    output({ error: 'No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.' }, 1);
   }
 
   // Spawn a detached child process that runs the daemon

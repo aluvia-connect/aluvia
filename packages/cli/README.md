@@ -8,23 +8,28 @@ The official command-line interface for [Aluvia](https://aluvia.io) — launch a
 npm install -g @aluvia/cli
 ```
 
-## Get an Aluvia API Key
+## Authentication
 
-You need an API key to use the CLI. Get one from the [Aluvia dashboard](https://dashboard.aluvia.io):
+```bash
+aluvia auth
+```
 
-1. Sign up or sign in at [dashboard.aluvia.io](https://dashboard.aluvia.io)
-2. In your account, open the API & SDKs section
-3. Copy your API key
+Open the link it prints, confirm the code, and you're done. Your API key is saved to `~/.aluvia/config.json`.
 
-## Setup
+```bash
+aluvia auth status   # check whether you're authenticated
+aluvia auth logout   # remove the stored API key
+```
 
-Set your API key as an environment variable:
+### Using an environment variable instead
+
+For CI or scripted environments you can skip `aluvia auth` and set the key directly. The environment variable always takes precedence over a key stored by `aluvia auth`.
 
 ```bash
 export ALUVIA_API_KEY="aluvia_..."
 ```
 
-Or add `ALUVIA_API_KEY=...` to a `.env` file (never commit it).
+You can find your API key in the dashboard's **API & SDKs** section. Add it to a `.env` file if you prefer (never commit it).
 
 ## Features
 
@@ -193,7 +198,8 @@ See the [SDK Documentation](../sdk/README.md) for more details.
 
 ## Troubleshooting
 
-- **"ALUVIA_API_KEY environment variable is required"**: Ensure you have exported your API key in your shell configuration (`.bashrc`, `.zshrc`) or current session.
+- **"No API key found"**: Run `aluvia auth` to log in, or export `ALUVIA_API_KEY` in your shell.
+- **`aluvia auth` times out**: Open the printed link in a browser and confirm the code matches.
 - **"Browser process exited unexpectedly"**: The daemon failed to start. Check if Chrome/Chromium is installed or if there are port conflicts.
 - **"Invalid session name"**: Session names must contain only letters, numbers, hyphens, and underscores.
 
