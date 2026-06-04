@@ -1,6 +1,6 @@
 {
   "name": "@aluvia/cli",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Aluvia CLI - command line tools for browser automation and session management",
   "license": "MIT",
   "author": "Aluvia",
