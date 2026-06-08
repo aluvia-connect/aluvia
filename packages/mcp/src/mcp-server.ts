@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -260,8 +262,13 @@ async function main(): Promise<void> {
   console.error("Aluvia MCP server running on stdio");
 }
 
-// Only run when executed directly (not when imported for testing)
-const isMcpServer = process.argv[1]?.match(/(?:mcp-server)\.[jt]s$/);
+// Only run when executed directly (not when imported for testing).
+// Resolve process.argv[1] through any symlinks (e.g. npm's global bin -> dist/esm/mcp-server.js)
+// and compare to this module's URL. This is symlink-safe, unlike a filename regex which
+// fails when launched via the extension-less `aluvia-mcp` bin symlink.
+const entry = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : "";
+// @ts-ignore - import.meta.url exists at runtime in ESM (the only build the bin/main uses)
+const isMcpServer = entry === import.meta.url;
 if (isMcpServer) {
   main().catch((err) => {
     console.error("Fatal error in MCP server:", err);

@@ -1,6 +1,6 @@
 {
   "name": "@aluvia/mcp",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Aluvia MCP server — Model Context Protocol tools for browser sessions and account",
   "license": "MIT",
   "author": "Aluvia",
