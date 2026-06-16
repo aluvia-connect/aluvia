@@ -36,9 +36,9 @@
 
 ## Get an Aluvia API Key
 
-You need an API key to run the MCP server. Get one from the [Aluvia dashboard](https://dashboard.aluvia.io):
+You need an API key to run the MCP server. Get one from the [Aluvia dashboard](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral):
 
-1. Sign up or sign in at [dashboard.aluvia.io](https://dashboard.aluvia.io)
+1. Sign up or sign in at [dashboard.aluvia.io](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)
 2. In your account, open the API & SDKs section
 3. Copy your API key
 
@@ -222,7 +222,7 @@ Full parameter and response details: [MCP Server Guide — Tool Reference](https
 
 | Resource             | URL                                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Aluvia Dashboard** | [dashboard.aluvia.io](https://dashboard.aluvia.io)                                                                                                   |
+| **Aluvia Dashboard** | [dashboard.aluvia.io](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)                                                                                                   |
 | **npm**              | [npmjs.com/package/@aluvia/mcp](https://www.npmjs.com/package/@aluvia/mcp)                                                                           |
 | **Full MCP Guide**   | [docs/mcp-server-guide.md](https://github.com/aluvia-connect/sdk-node/blob/main/docs/mcp-server-guide.md)                                            |
 | **Aluvia SDK**       | [@aluvia/sdk](https://github.com/aluvia-connect/sdk-node) — CLI, adapters, and [quick start](https://github.com/aluvia-connect/sdk-node#quick-start) |

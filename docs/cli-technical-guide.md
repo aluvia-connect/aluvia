@@ -692,7 +692,7 @@ aluvia auth
 ```
 Authenticate with Aluvia:
 
-  1. Open: https://dashboard.aluvia.io/...
+  1. Open: https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral/...
   2. Confirm this code matches: XXXX-XXXX
 ```
 

@@ -45,7 +45,7 @@ This repository is organized as a monorepo with three packages:
 
 ### 1. Get Aluvia API key
 
-[Aluvia dashboard](https://dashboard.aluvia.io)
+[Aluvia dashboard](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)
 
 ### 2. Install
 

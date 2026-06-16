@@ -74,7 +74,7 @@ await api.account.get(); // throws InvalidApiKeyError
 ```
 
 **Fix:**
-- Verify your API key is correct at [dashboard.aluvia.io](https://dashboard.aluvia.io)
+- Verify your API key is correct at [dashboard.aluvia.io](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)
 - Account endpoints (`/account/...`) require an **account API token**, not a connection token
 - Check if the key has expired
 
@@ -301,7 +301,7 @@ export ALUVIA_API_KEY="your-api-key"
 **Context:** Any API call
 
 **Fix:**
-- Verify your API key at [dashboard.aluvia.io](https://dashboard.aluvia.io)
+- Verify your API key at [dashboard.aluvia.io](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)
 - Account endpoints require an **account API token**
 - Connection endpoints can use either account or connection tokens
 

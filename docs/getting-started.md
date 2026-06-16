@@ -17,7 +17,7 @@ A step-by-step guide to installing, configuring, and running your first Aluvia-p
 ## Prerequisites
 
 - **Node.js 18+** — Aluvia uses native `fetch`, `AbortController`, and ES modules
-- **An Aluvia API key** — sign up at [dashboard.aluvia.io](https://dashboard.aluvia.io)
+- **An Aluvia API key** — sign up at [dashboard.aluvia.io](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)
 
 ---
 
