@@ -123,4 +123,36 @@ describe('control server', () => {
     assert.strictEqual(missing.status, 404);
     assert.strictEqual(stored.status, 'unverified');
   });
+
+  test('POST /last-connect clears lastConnect and returns hostname null', async () => {
+    let lastConnect: string | null = 'verify.example';
+    server = createControlServer({
+      getStatus: () => {
+        throw new Error('unused');
+      },
+      route: async () => ({ rules: [] }),
+      unroute: async () => ({ rules: [] }),
+      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
+      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
+      stop: () => {},
+      getLastConnect: () => lastConnect,
+      setLastConnect: (hostname) => {
+        lastConnect = hostname;
+      },
+    });
+    const port = await listen(server);
+
+    const cleared = await fetch(`http://127.0.0.1:${port}/last-connect`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(cleared.status, 200);
+    assert.deepStrictEqual(await cleared.json(), { hostname: null });
+    assert.strictEqual(lastConnect, null);
+
+    const last = await fetch(`http://127.0.0.1:${port}/last-connect`);
+    assert.strictEqual(last.status, 200);
+    assert.deepStrictEqual(await last.json(), { hostname: null });
+  });
 });

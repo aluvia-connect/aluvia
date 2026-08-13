@@ -51,6 +51,11 @@ export async function tryGsettings(dataPort: number): Promise<boolean> {
 }
 
 export async function waitForExternalConnect(opts: { timeoutMs: number }): Promise<boolean> {
+  try {
+    await controlRequest('POST', '/last-connect', {});
+  } catch {
+    // daemon may be restarting; GET poll still times out to needs_ui
+  }
   const deadline = Date.now() + opts.timeoutMs;
   for (;;) {
     try {

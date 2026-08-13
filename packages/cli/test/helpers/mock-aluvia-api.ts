@@ -12,8 +12,10 @@ export type MockConnection = {
 export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promise<{
   url: string;
   state: MockConnection;
+  requests: Array<{ method: string; url: string }>;
   close: () => Promise<void>;
 }> {
+  const requests: Array<{ method: string; url: string }> = [];
   const state: MockConnection = {
     id: seed?.id ?? 3449,
     session_id: seed?.session_id ?? null,
@@ -37,6 +39,7 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
 
   const server = http.createServer((req, res) => {
     const url = req.url ?? '';
+    requests.push({ method: req.method ?? '', url });
     const send = (status: number, body: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', etag: '"t1"' });
       res.end(JSON.stringify(body));
@@ -79,6 +82,7 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
   return {
     url,
     state,
+    requests,
     close: () =>
       new Promise((resolve) => {
         server.close(() => resolve());

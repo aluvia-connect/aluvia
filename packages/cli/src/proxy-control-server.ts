@@ -37,6 +37,7 @@ export type ControlHandlers = {
   stop: () => void;
   /** Filled in Task 4. Optional here so Task 2 can omit the routes. */
   getLastConnect?: () => string | null;
+  setLastConnect?: (hostname: string | null) => void;
   setAttach?: (attach: ProxyAttachState) => void;
 };
 
@@ -156,6 +157,13 @@ async function handleRequest(
 
     if (method === 'GET' && pathname === '/last-connect') {
       sendJson(res, 200, { hostname: handlers.getLastConnect?.() ?? null });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/last-connect') {
+      await readJsonBody(req);
+      handlers.setLastConnect?.(null);
+      sendJson(res, 200, { hostname: null });
       return;
     }
 

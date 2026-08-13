@@ -38,9 +38,14 @@ function parsePortFlag(value: string, flag: string): number {
   return parsed;
 }
 
-function parseStartArgs(args: string[]): { dataPort: number; controlPort: number } {
+function parseStartArgs(args: string[]): {
+  dataPort: number;
+  controlPort: number;
+  connectionId?: number;
+} {
   let dataPort = parsePositiveInt(process.env.ALUVIA_PROXY_PORT) ?? DEFAULT_DATA_PORT;
   let controlPort = parsePositiveInt(process.env.ALUVIA_PROXY_CONTROL_PORT) ?? DEFAULT_CONTROL_PORT;
+  let connectionId: number | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port' && args[i + 1]) {
       dataPort = parsePortFlag(args[i + 1], '--port');
@@ -48,9 +53,12 @@ function parseStartArgs(args: string[]): { dataPort: number; controlPort: number
     } else if (args[i] === '--control-port' && args[i + 1]) {
       controlPort = parsePortFlag(args[i + 1], '--control-port');
       i++;
+    } else if (args[i] === '--connection-id' && args[i + 1]) {
+      connectionId = parsePortFlag(args[i + 1], '--connection-id');
+      i++;
     }
   }
-  return { dataPort, controlPort };
+  return connectionId != null ? { dataPort, controlPort, connectionId } : { dataPort, controlPort };
 }
 
 function isLive(state: ProxyJson | null): state is ProxyJson {
@@ -127,7 +135,7 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
     output({ error: NO_API_KEY }, 1);
   }
 
-  const { dataPort, controlPort } = parseStartArgs(args);
+  const { dataPort, controlPort, connectionId: flagConnectionId } = parseStartArgs(args);
   const existing = readProxyJson();
 
   if (await portBusy(dataPort)) {
@@ -137,7 +145,7 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
     output({ error: `port ${controlPort} in use` }, 1);
   }
 
-  const connectionId = existing?.connectionId ?? undefined;
+  const connectionId = flagConnectionId ?? existing?.connectionId ?? undefined;
   const dir = configDir();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const logFile = path.join(dir, 'proxy.log');

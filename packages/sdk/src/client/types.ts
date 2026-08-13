@@ -42,7 +42,7 @@ export type AluviaClientOptions = {
 
   /**
    * Optional: polling interval for refreshing account connection config.
-   * Default: 5000 ms.
+   * Default: 5000 ms. `0` disables polling. Other values below 1000 are capped at 1000.
    */
   pollIntervalMs?: number;
 

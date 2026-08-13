@@ -35,6 +35,28 @@ describe('AluviaClient', () => {
     assert.ok(client);
   });
 
+  test('pollIntervalMs 0 is stored unclamped; other values still clamp to 1000', () => {
+    const disabled = new AluviaClient({
+      apiKey: 'test-api-key',
+      pollIntervalMs: 0,
+      logLevel: 'silent',
+    });
+    assert.strictEqual((disabled as any).configManager.options.pollIntervalMs, 0);
+
+    const low = new AluviaClient({
+      apiKey: 'test-api-key',
+      pollIntervalMs: 500,
+      logLevel: 'silent',
+    });
+    assert.strictEqual((low as any).configManager.options.pollIntervalMs, 1000);
+
+    const unset = new AluviaClient({
+      apiKey: 'test-api-key',
+      logLevel: 'silent',
+    });
+    assert.strictEqual((unset as any).configManager.options.pollIntervalMs, 5000);
+  });
+
   test('applies default options correctly', () => {
     // This test verifies defaults are applied (constructor doesn't throw)
     const client = new AluviaClient({
@@ -1032,6 +1054,36 @@ describe('ConfigManager polling', () => {
     assert.strictEqual(cfg2?.sessionId, 's2');
 
     assert.deepStrictEqual(seenIfNoneMatch, [undefined, '"e1"', '"e1"']);
+  });
+
+  test('startPolling is a no-op when pollIntervalMs is 0', () => {
+    let setIntervalCalls = 0;
+    const originalSetInterval = globalThis.setInterval;
+    globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+      setIntervalCalls += 1;
+      return originalSetInterval(...args);
+    }) as typeof setInterval;
+
+    try {
+      const mgr = new ConfigManager({
+        apiKey: 'test-api-key',
+        apiBaseUrl: 'https://api.aluvia.io/v1',
+        pollIntervalMs: 0,
+        gatewayProtocol: 'http',
+        gatewayPort: 8080,
+        logLevel: 'silent',
+      });
+      let polls = 0;
+      (mgr as any).pollOnce = async () => {
+        polls += 1;
+      };
+      mgr.startPolling();
+      assert.strictEqual(setIntervalCalls, 0);
+      assert.strictEqual((mgr as any).timer, null);
+      assert.strictEqual(polls, 0);
+    } finally {
+      globalThis.setInterval = originalSetInterval;
+    }
   });
 });
 

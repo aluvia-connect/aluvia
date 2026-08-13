@@ -167,6 +167,40 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.strictEqual(fs.existsSync(path.join(home, 'ext', 'manifest.json')), true);
   });
 
+  test('pre-existing CONNECT is not treated as attach proof', async () => {
+    await startDaemon();
+    await connectViaProxy(dataPort, 'verify.example').catch(() => undefined);
+    process.env.ALUVIA_ATTACH_WAIT_MS = '80';
+    const result = await captureOutput(() => handleProxy(['attach']));
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.status, 'needs_ui');
+  });
+
+  test('CONNECT after wait start verifies; loopback does not wipe lastConnect', async () => {
+    await startDaemon();
+    process.env.ALUVIA_ATTACH_WAIT_MS = '2000';
+    const pending = captureOutput(() => handleProxy(['attach']));
+    await delay(50);
+    await connectViaProxy(dataPort, 'verify.example').catch(() => undefined);
+    await connectViaProxy(dataPort, 'localhost').catch(() => undefined);
+    const result = await pending;
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.status, 'verified');
+
+    const last = await fetch(`http://127.0.0.1:${controlPort}/last-connect`);
+    assert.strictEqual(last.status, 200);
+    assert.deepStrictEqual(await last.json(), { hostname: 'verify.example' });
+  });
+
+  test('observer ignores loopback and keeps last public host', async () => {
+    await startDaemon();
+    await connectViaProxy(dataPort, 'verify.example').catch(() => undefined);
+    await connectViaProxy(dataPort, '127.0.0.1').catch(() => undefined);
+    const last = await fetch(`http://127.0.0.1:${controlPort}/last-connect`);
+    assert.strictEqual(last.status, 200);
+    assert.deepStrictEqual(await last.json(), { hostname: 'verify.example' });
+  });
+
   test('Restart preserves attach unless data port changed', async () => {
     await startDaemon();
     process.env.ALUVIA_ATTACH_WAIT_MS = '2000';

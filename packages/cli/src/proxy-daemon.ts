@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { AluviaClient } from '@aluvia/sdk';
+import { AluviaClient, isLoopbackHostname } from '@aluvia/sdk';
 import { configDir } from './config.js';
 import { createControlServer } from './proxy-control-server.js';
 import {
@@ -85,6 +85,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     startPlaywright: false,
     localPort: opts.dataPort,
     logLevel: 'info',
+    pollIntervalMs: 0,
     ...(opts.connectionId != null ? { connectionId: opts.connectionId } : {}),
     ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
     ...(opts.gatewayHost ? { gatewayHost: opts.gatewayHost } : {}),
@@ -93,6 +94,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
 
   let lastConnect: string | null = null;
   client.setRequestObserver((hostname) => {
+    if (isLoopbackHostname(hostname)) return;
     lastConnect = hostname;
   });
 
@@ -238,6 +240,9 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       void shutdown();
     },
     getLastConnect: () => lastConnect,
+    setLastConnect: (hostname) => {
+      lastConnect = hostname;
+    },
     setAttach: (next) => {
       attach = next;
       persist(true);

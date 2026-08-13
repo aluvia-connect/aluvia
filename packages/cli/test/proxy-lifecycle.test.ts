@@ -102,6 +102,24 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(api.state.session_id, state.sessionId);
   });
 
+  test('--connection-id reuses the seeded connection without POST', async () => {
+    const result = await captureOutput(() =>
+      handleProxy([...startArgs(dataPort, controlPort), '--connection-id', '3449']),
+    );
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.connectionId, 3449);
+    assert.strictEqual(readProxyJson()?.connectionId, 3449);
+    assert.ok(
+      !api.requests.some((req) => req.method === 'POST' && req.url === '/account/connections'),
+      `unexpected create: ${JSON.stringify(api.requests)}`,
+    );
+    assert.ok(
+      api.requests.some(
+        (req) => req.method === 'GET' && req.url.startsWith('/account/connections/3449'),
+      ),
+    );
+  });
+
   test('sticky id reused', async () => {
     const first = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
     assert.strictEqual(first.isError, false, String(first.data.error ?? ''));

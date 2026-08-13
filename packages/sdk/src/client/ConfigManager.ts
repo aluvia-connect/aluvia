@@ -236,6 +236,11 @@ export class ConfigManager {
    * Uses ETag for efficient conditional requests.
    */
   startPolling(): void {
+    if (this.options.pollIntervalMs === 0) {
+      this.logger.debug('Config polling disabled (pollIntervalMs=0)');
+      return;
+    }
+
     // Don't start if already polling
     if (this.timer) {
       this.logger.debug('Polling already active, skipping startPolling()');
