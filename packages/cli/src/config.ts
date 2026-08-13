@@ -6,7 +6,8 @@ import path from 'node:path';
  * Local credential store for the Aluvia CLI.
  *
  * The API key obtained via `aluvia auth` is persisted to
- * `~/.aluvia/config.json` with restrictive permissions. The env var
+ * `$ALUVIA_HOME/config.json` (default `/workspace/.aluvia` when `/workspace`
+ * exists, else `~/.aluvia`) with restrictive permissions. The env var
  * ALUVIA_API_KEY always takes precedence over this file (see api-helpers.ts).
  */
 
@@ -14,10 +15,25 @@ interface AluviaConfig {
   apiKey?: string;
 }
 
-export function configDir(): string {
-  const fromEnv = (process.env.ALUVIA_HOME ?? '').trim();
+const WORKSPACE_DIR = '/workspace';
+
+export function resolveConfigDir(opts: {
+  aluviaHome?: string;
+  workspaceExists: boolean;
+  homedir: string;
+}): string {
+  const fromEnv = (opts.aluviaHome ?? '').trim();
   if (fromEnv) return path.resolve(fromEnv);
-  return path.join(os.homedir(), '.aluvia');
+  if (opts.workspaceExists) return path.resolve(path.join(WORKSPACE_DIR, '.aluvia'));
+  return path.join(opts.homedir, '.aluvia');
+}
+
+export function configDir(): string {
+  return resolveConfigDir({
+    aluviaHome: process.env.ALUVIA_HOME,
+    workspaceExists: fs.existsSync(WORKSPACE_DIR),
+    homedir: os.homedir(),
+  });
 }
 
 export function configPath(): string {

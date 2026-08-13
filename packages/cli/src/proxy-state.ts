@@ -34,12 +34,12 @@ export type ProxyJson = {
   attach: ProxyAttachState;
 };
 
-export function defaultAttach(home: string): ProxyAttachState {
+export function defaultAttach(_home?: string): ProxyAttachState {
   return {
     status: 'unverified',
     method: null,
     verifiedAt: null,
-    extensionPath: path.join(home, 'ext'),
+    extensionPath: null,
   };
 }
 

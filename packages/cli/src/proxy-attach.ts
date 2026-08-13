@@ -189,36 +189,23 @@ export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs:
   }
 }
 
-export function pickAttachMethod(opts: { policyPath: string | null; gsettings: boolean }): AttachMethod {
-  const policyPath = opts.policyPath ?? '';
-  if (policyPath.startsWith('/etc/') || (process.env.ALUVIA_CHROME_POLICY_DIR ?? '').trim().length > 0) {
-    return 'policy';
-  }
+export function pickAttachMethod(opts: {
+  policyPath: string | null;
+  gsettings: boolean;
+  hasExtension?: boolean;
+}): AttachMethod {
+  if (opts.policyPath) return 'policy';
   if (opts.gsettings) return 'gsettings';
-  return 'extension';
+  if (opts.hasExtension) return 'extension';
+  return 'policy';
 }
 
-export function attachInstructions(opts: {
-  extensionPath: string;
-  policyPath: string | null;
-  dataPort: number;
-}): string {
-  const body = JSON.stringify(chromeProxyPolicyBody(opts.dataPort));
-  const parts: string[] = [];
-  if (opts.policyPath?.startsWith('/etc/')) {
-    parts.push(
-      `Chrome policy at ${opts.policyPath}. Open chrome://policy → Reload policies. Confirm ProxySettings and QuicAllowed.`,
-    );
-  } else {
-    parts.push(
-      `Write the policy yourself (this process often cannot sudo): sudo -n mkdir -p /etc/opt/chrome/policies/managed && echo '${body}' | sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json. Then chrome://policy → Reload policies. Confirm ProxySettings and QuicAllowed. Home-dir policy is ignored. Do not use chrome://settings/system.`,
-    );
-  }
-  parts.push(
-    'Open a new tab to a site, then run `aluvia proxy setup` again. Do not load the unpacked extension unless asked. QuicAllowed needs one Chrome restart at setup.',
-  );
-  parts.push(
-    `After route/unroute, reload the tab (live tunnels for that host are dropped). Extension fallback only if /etc policy cannot be written: chrome://extensions → Load unpacked → ${opts.extensionPath}`,
-  );
-  return parts.join(' ');
+/** One shell command the agent can exec. Node often cannot sudo; the Bot's shell can. */
+export function policyWriteCommand(dataPort: number): string {
+  const body = JSON.stringify(chromeProxyPolicyBody(dataPort), null, 2);
+  return [
+    "sudo -n mkdir -p /etc/opt/chrome/policies/managed && sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json <<'EOF'",
+    body,
+    'EOF',
+  ].join('\n');
 }

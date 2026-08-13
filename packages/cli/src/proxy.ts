@@ -8,9 +8,9 @@ import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
 import {
-  attachInstructions,
   ensureAttachExtension,
   pickAttachMethod,
+  policyWriteCommand,
   tryGsettings,
   waitForExternalConnect,
   writeChromeProxyPolicy,
@@ -262,9 +262,9 @@ type AttachOutcome = {
   status: 'verified' | 'needs_ui';
   method: ProxyAttachState['method'];
   proxyUrl: string;
-  extensionPath: string;
+  extensionPath: string | null;
   policyPath: string | null;
-  instructions?: string;
+  policyCommand?: string;
 };
 
 async function persistAttach(attach: ProxyAttachState): Promise<void> {
@@ -287,36 +287,43 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
   }
 
   const dataPort = state.dataPort;
-  const extensionPath = path.join(configDir(), 'ext');
-  const ext = ensureAttachExtension(extensionPath, dataPort);
   const policy = writeChromeProxyPolicy(dataPort);
+  const extensionPath = path.join(configDir(), 'ext');
+  // Policy is the product. Only write the unpacked extension if /etc (or the
+  // override dir) could not be written — last resort, not advertised.
+  const ext = policy.path ? null : ensureAttachExtension(extensionPath, dataPort);
   const gok = await tryGsettings(dataPort);
   // If we rewrote artifacts this call, only CONNECTs from now on count
   // (so a prior curl -x cannot fake attach). If artifacts already matched,
-  // count CONNECTs since they were written — so "load extension, browse,
-  // run setup again" verifies without another navigation during the wait.
+  // count CONNECTs since they were written so the next setup can verify.
   let sinceMs = Date.now();
-  if (!ext.wrote && !policy.wrote) {
-    const times = [ext.mtimeMs, policy.mtimeMs].filter((t): t is number => t != null);
+  const wroteThisCall = policy.wrote || Boolean(ext?.wrote);
+  if (!wroteThisCall) {
+    const times = [policy.mtimeMs, ext?.mtimeMs].filter((t): t is number => t != null);
     if (times.length > 0) sinceMs = Math.min(...times);
   }
   const timeoutMs = Number(process.env.ALUVIA_ATTACH_WAIT_MS) || 15_000;
   const seen = await waitForExternalConnect({ timeoutMs, sinceMs });
+  const method = pickAttachMethod({
+    policyPath: policy.path,
+    gsettings: gok,
+    hasExtension: ext != null,
+  });
+  const policyCommand = policy.path ? undefined : policyWriteCommand(dataPort);
 
   if (seen) {
-    const method = pickAttachMethod({ policyPath: policy.path, gsettings: gok });
     const attach: ProxyAttachState = {
       status: 'verified',
       method,
       verifiedAt: new Date().toISOString(),
-      extensionPath,
+      extensionPath: null,
     };
     await persistAttach(attach);
     return {
       status: 'verified',
       method,
       proxyUrl: state.proxyUrl,
-      extensionPath,
+      extensionPath: null,
       policyPath: policy.path,
     };
   }
@@ -325,34 +332,42 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
     status: 'needs_ui',
     method: null,
     verifiedAt: null,
-    extensionPath,
+    extensionPath: null,
   };
   await persistAttach(attach);
   return {
     status: 'needs_ui',
     method: null,
     proxyUrl: state.proxyUrl,
-    extensionPath,
+    extensionPath: ext ? extensionPath : null,
     policyPath: policy.path,
-    instructions: attachInstructions({
-      extensionPath,
-      policyPath: policy.path,
-      dataPort,
-    }),
+    ...(policyCommand ? { policyCommand } : {}),
+  };
+}
+
+function attachPublicFields(result: AttachOutcome, ready: boolean): Record<string, unknown> {
+  return {
+    status: result.status,
+    method: result.method,
+    ...(result.policyPath ? { policyPath: result.policyPath } : {}),
+    ...(!ready && result.policyCommand ? { policyCommand: result.policyCommand } : {}),
   };
 }
 
 async function handleAttach(args: string[]): Promise<void> {
   const result = await runAttach(args);
   if (result.status === 'verified') {
-    output({ status: 'verified', method: result.method, proxyUrl: result.proxyUrl });
+    output({
+      status: 'verified',
+      method: result.method,
+      proxyUrl: result.proxyUrl,
+      ...attachPublicFields(result, true),
+    });
   }
   output(
     {
-      status: 'needs_ui',
-      extensionPath: result.extensionPath,
-      ...(result.policyPath ? { policyPath: result.policyPath } : {}),
-      instructions: result.instructions,
+      proxyUrl: result.proxyUrl,
+      ...attachPublicFields(result, false),
     },
     0,
   );
@@ -371,17 +386,14 @@ async function handleSetup(args: string[]): Promise<void> {
   } catch (err) {
     failControl(err);
   }
+  const ready = result.status === 'verified' && healthy;
   output({
     ...statusJson,
     healthy,
-    ready: result.status === 'verified' && healthy,
-    status: result.status,
-    method: result.method,
-    extensionPath: result.extensionPath,
+    ready,
     skillPaths: skill.skillPaths,
     ...(skill.error ? { skillError: skill.error } : {}),
-    ...(result.policyPath ? { policyPath: result.policyPath } : {}),
-    ...(result.instructions ? { instructions: result.instructions } : {}),
+    ...attachPublicFields(result, ready),
   });
 }
 

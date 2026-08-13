@@ -8,7 +8,7 @@ The official command-line interface for [Aluvia](https://aluvia.io) — launch a
 npm install -g @aluvia/cli@1.2.0
 ```
 
-Computer-use / Grok Bot: `aluvia auth` then `aluvia proxy setup`. That starts the daemon, prints Chrome attach instructions, and installs the `aluvia-proxy` skill into `~/.agents/skills`.
+Computer-use / Grok Bot: `aluvia auth` then `aluvia proxy setup`. That starts the daemon, attaches Chrome via `/etc` policy, and installs the `aluvia-proxy` skill into `~/.agents/skills`.
 
 ## Authentication
 
@@ -178,10 +178,10 @@ aluvia proxy setup
 ```
 
 - Default data port: `18787`. Default control port: `18788`.
-- State lives under `ALUVIA_HOME` (default `~/.aluvia`): auth config, `proxy.json`, logs, attach extension, and optional Chrome policy file.
+- State lives under `ALUVIA_HOME` (default `/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`): auth config, `proxy.json`, logs, and Chrome policy path.
 - Catch-all `*` is refused. Route only the blocked hostname. `route` / `unroute` drop that host's live CONNECT tunnels; reload the tab.
 - `setup` starts the daemon, installs the `aluvia-proxy` skill into `~/.agents/skills`, and attaches. `ready: true` means the GUI browser has CONNECTed to the local proxy.
-- `attach` / `setup` return `verified` or `needs_ui` (exit 0). On `needs_ui`, follow `instructions` (write `/etc` Chrome policy; do not load the unpacked extension unless asked).
+- `attach` / `setup` return `verified` or `needs_ui` (exit 0). On `needs_ui`, if `policyCommand` is set, run it in a shell, then reload `chrome://policy` and run `setup` again.
 
 ## Scripting (`--run`)
 

@@ -34,7 +34,14 @@ describe('proxy skill install', () => {
     const body = fs.readFileSync(src, 'utf8');
     assert.ok(body.includes('name: aluvia-proxy'));
     assert.ok(body.includes('aluvia proxy route'));
+    assert.ok(body.includes('policyCommand'));
+    assert.ok(body.includes('ready: true'));
+    assert.ok(body.includes('Restart required'));
     assert.ok(!body.includes('aluvia-grok-bot-install'));
+    assert.ok(!body.includes('export ALUVIA_HOME'));
+    assert.ok(!body.includes('Load unpacked'));
+    assert.ok(!body.includes('net-internals'));
+    assert.ok(!body.includes('last-connect'));
     const repoCopy = path.join(process.cwd(), '..', '..', 'skills', 'aluvia-proxy', 'SKILL.md');
     if (fs.existsSync(repoCopy)) {
       assert.strictEqual(body, fs.readFileSync(repoCopy, 'utf8'));

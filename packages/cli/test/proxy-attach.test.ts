@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { captureOutput } from '../src/mcp-helpers.js';
+import { pickAttachMethod, policyWriteCommand } from '../src/proxy-attach.js';
 import { handleProxy } from '../src/proxy.js';
 import { readProxyJson, writeProxyJson } from '../src/proxy-state.js';
 import { createMockAluviaApi } from './helpers/mock-aluvia-api.js';
@@ -47,6 +48,41 @@ function attachArgs(dataPort: number, controlPort: number): string[] {
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+describe('proxy attach helpers', () => {
+  test('policyWriteCommand is a sudo tee heredoc with ProxySettings', () => {
+    const cmd = policyWriteCommand(18787);
+    assert.ok(cmd.startsWith('sudo -n mkdir -p /etc/opt/chrome/policies/managed'));
+    assert.ok(cmd.includes("sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json <<'EOF'"));
+    assert.ok(cmd.includes('"ProxyMode": "fixed_servers"'));
+    assert.ok(cmd.includes('127.0.0.1:18787'));
+    assert.ok(cmd.includes('"QuicAllowed": false'));
+    assert.ok(cmd.trimEnd().endsWith('EOF'));
+  });
+
+  test('pickAttachMethod prefers policy when a policy file exists', () => {
+    assert.strictEqual(
+      pickAttachMethod({
+        policyPath: '/etc/opt/chrome/policies/managed/aluvia-proxy.json',
+        gsettings: true,
+        hasExtension: true,
+      }),
+      'policy',
+    );
+    assert.strictEqual(
+      pickAttachMethod({ policyPath: null, gsettings: true, hasExtension: true }),
+      'gsettings',
+    );
+    assert.strictEqual(
+      pickAttachMethod({ policyPath: null, gsettings: false, hasExtension: true }),
+      'extension',
+    );
+    assert.strictEqual(
+      pickAttachMethod({ policyPath: null, gsettings: false, hasExtension: false }),
+      'policy',
+    );
+  });
+});
 
 describe('proxy attach', { concurrency: 1 }, () => {
   let home: string;
@@ -102,7 +138,22 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.strictEqual(started.isError, false, String(started.data.error ?? ''));
   }
 
-  test('attach writes a valid MV3 extension', async () => {
+  test('attach does not write an extension when policy can be written', async () => {
+    await startDaemon();
+    process.env.ALUVIA_ATTACH_WAIT_MS = '50';
+    const result = await captureOutput(() => handleProxy(['attach']));
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(fs.existsSync(path.join(home, 'ext', 'manifest.json')), false);
+    assert.strictEqual(result.data.extensionPath, undefined);
+    assert.strictEqual(result.data.instructions, undefined);
+    assert.ok(typeof result.data.policyPath === 'string');
+    assert.strictEqual(result.data.policyCommand, undefined);
+  });
+
+  test('attach writes a valid MV3 extension only when policy cannot be written', async () => {
+    const notADir = path.join(home, 'not-a-policy-dir');
+    fs.writeFileSync(notADir, 'x');
+    process.env.ALUVIA_CHROME_POLICY_DIR = notADir;
     await startDaemon();
     process.env.ALUVIA_ATTACH_WAIT_MS = '50';
     const result = await captureOutput(() => handleProxy(['attach']));
@@ -125,6 +176,10 @@ describe('proxy attach', { concurrency: 1 }, () => {
     for (const host of ['localhost', '127.0.0.1', '::1', '<local>']) {
       assert.ok(background.includes(host), `bypassList missing ${host}`);
     }
+    assert.ok(typeof result.data.policyCommand === 'string');
+    assert.ok((result.data.policyCommand as string).includes('/etc/opt/chrome/policies/managed'));
+    assert.strictEqual(result.data.extensionPath, undefined);
+    assert.strictEqual(result.data.instructions, undefined);
   });
 
   test('CONNECT flips to verified', async () => {
@@ -136,12 +191,10 @@ describe('proxy attach', { concurrency: 1 }, () => {
     const result = await pending;
     assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
     assert.strictEqual(result.data.status, 'verified');
-    assert.ok(
-      result.data.method === 'extension' ||
-        result.data.method === 'gsettings' ||
-        result.data.method === 'policy',
-    );
+    assert.strictEqual(result.data.method, 'policy');
     assert.strictEqual(result.data.proxyUrl, `http://127.0.0.1:${dataPort}`);
+    assert.strictEqual(result.data.extensionPath, undefined);
+    assert.strictEqual(result.data.policyCommand, undefined);
 
     const attach = readProxyJson()?.attach;
     assert.ok(attach);
@@ -156,12 +209,10 @@ describe('proxy attach', { concurrency: 1 }, () => {
     const result = await captureOutput(() => handleProxy(['attach']));
     assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
     assert.strictEqual(result.data.status, 'needs_ui');
-    assert.ok(typeof result.data.extensionPath === 'string');
-    assert.ok((result.data.extensionPath as string).length > 0);
-    assert.ok(typeof result.data.instructions === 'string');
-    assert.ok((result.data.instructions as string).length > 0);
-    assert.ok((result.data.instructions as string).includes('/etc/opt/chrome/policies/managed'));
-    assert.ok((result.data.instructions as string).includes('chrome://policy'));
+    assert.strictEqual(result.data.extensionPath, undefined);
+    assert.strictEqual(result.data.instructions, undefined);
+    assert.ok(typeof result.data.policyPath === 'string');
+    assert.strictEqual(result.data.policyCommand, undefined);
   });
 
   test('Attach starts proxyd when down', async () => {
@@ -171,7 +222,8 @@ describe('proxy attach', { concurrency: 1 }, () => {
     const state = readProxyJson();
     assert.ok(state);
     assert.strictEqual(state.ready, true);
-    assert.strictEqual(fs.existsSync(path.join(home, 'ext', 'manifest.json')), true);
+    assert.strictEqual(fs.existsSync(path.join(home, 'chrome-policy', 'aluvia-proxy.json')), true);
+    assert.strictEqual(fs.existsSync(path.join(home, 'ext', 'manifest.json')), false);
   });
 
   test('pre-existing CONNECT is not treated as attach proof', async () => {
@@ -259,6 +311,26 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.strictEqual(result.data.status, 'verified');
     assert.strictEqual(result.data.healthy, true);
     assert.ok(Array.isArray(result.data.skillPaths));
+    assert.strictEqual(result.data.extensionPath, undefined);
+    assert.strictEqual(result.data.policyCommand, undefined);
+    assert.strictEqual(result.data.instructions, undefined);
+    assert.ok(typeof result.data.policyPath === 'string');
+  });
+
+  test('setup needs_ui exposes policyCommand when policy cannot be written', async () => {
+    const notADir = path.join(home, 'not-a-policy-dir');
+    fs.writeFileSync(notADir, 'x');
+    process.env.ALUVIA_CHROME_POLICY_DIR = notADir;
+    await startDaemon();
+    process.env.ALUVIA_ATTACH_WAIT_MS = '50';
+    const result = await captureOutput(() => handleProxy(['setup']));
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.ready, false);
+    assert.strictEqual(result.data.status, 'needs_ui');
+    assert.ok(typeof result.data.policyCommand === 'string');
+    assert.ok((result.data.policyCommand as string).includes('127.0.0.1:' + dataPort));
+    assert.strictEqual(result.data.extensionPath, undefined);
+    assert.strictEqual(result.data.instructions, undefined);
   });
 
   test('Restart preserves attach unless data port changed', async () => {

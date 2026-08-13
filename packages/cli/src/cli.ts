@@ -75,7 +75,9 @@ function printHelp(toStderr = false): void {
   log('  --end <ISO8601>            End date filter\n');
   log('Environment:');
   log('  ALUVIA_API_KEY             Optional. Takes precedence over the key stored by `aluvia auth`.');
-  log('  ALUVIA_HOME                Optional. Default ~/.aluvia. Auth + proxyd state live here.');
+  log(
+    '  ALUVIA_HOME                Optional. Default /workspace/.aluvia when /workspace exists, else ~/.aluvia.',
+  );
   log('  ALUVIA_PROXY_PORT          Optional. Data port (default 18787).');
   log('  ALUVIA_PROXY_CONTROL_PORT  Optional. Control port (default 18788).\n');
   log('Output:');

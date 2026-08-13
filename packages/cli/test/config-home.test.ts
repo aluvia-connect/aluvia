@@ -1,8 +1,9 @@
-import { describe, test, beforeEach, afterEach } from 'node:test';
+import { describe, test, afterEach } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { configDir } from '../src/config.js';
+import { configDir, resolveConfigDir } from '../src/config.js';
 
 describe('configDir ALUVIA_HOME', () => {
   const original = process.env.ALUVIA_HOME;
@@ -12,19 +13,56 @@ describe('configDir ALUVIA_HOME', () => {
     else process.env.ALUVIA_HOME = original;
   });
 
-  test('defaults to ~/.aluvia when ALUVIA_HOME is unset', () => {
+  test('resolveConfigDir defaults to ~/.aluvia when /workspace is absent', () => {
+    assert.strictEqual(
+      resolveConfigDir({ workspaceExists: false, homedir: '/Users/dev' }),
+      path.join('/Users/dev', '.aluvia'),
+    );
+  });
+
+  test('resolveConfigDir defaults to /workspace/.aluvia when /workspace exists', () => {
+    assert.strictEqual(
+      resolveConfigDir({ workspaceExists: true, homedir: '/Users/dev' }),
+      path.resolve('/workspace/.aluvia'),
+    );
+  });
+
+  test('ALUVIA_HOME wins over the /workspace default', () => {
+    assert.strictEqual(
+      resolveConfigDir({
+        aluviaHome: 'relative-aluvia-home',
+        workspaceExists: true,
+        homedir: '/Users/dev',
+      }),
+      path.resolve('relative-aluvia-home'),
+    );
+  });
+
+  test('whitespace-only ALUVIA_HOME is unset and still prefers /workspace', () => {
+    assert.strictEqual(
+      resolveConfigDir({ aluviaHome: '   ', workspaceExists: true, homedir: '/Users/dev' }),
+      path.resolve('/workspace/.aluvia'),
+    );
+    assert.strictEqual(
+      resolveConfigDir({ aluviaHome: '   ', workspaceExists: false, homedir: '/Users/dev' }),
+      path.join('/Users/dev', '.aluvia'),
+    );
+  });
+
+  test('configDir matches resolveConfigDir for the live machine', () => {
     delete process.env.ALUVIA_HOME;
-    assert.strictEqual(configDir(), path.join(os.homedir(), '.aluvia'));
+    assert.strictEqual(
+      configDir(),
+      resolveConfigDir({
+        workspaceExists: fs.existsSync('/workspace'),
+        homedir: os.homedir(),
+      }),
+    );
   });
 
   test('uses ALUVIA_HOME when set, resolved to an absolute path', () => {
     process.env.ALUVIA_HOME = 'relative-aluvia-home';
     assert.strictEqual(configDir(), path.resolve('relative-aluvia-home'));
-  });
-
-  test('treats whitespace-only ALUVIA_HOME as unset', () => {
-    process.env.ALUVIA_HOME = '   ';
-    assert.strictEqual(configDir(), path.join(os.homedir(), '.aluvia'));
   });
 
   test('saveApiKey writes config.json under ALUVIA_HOME', async () => {
