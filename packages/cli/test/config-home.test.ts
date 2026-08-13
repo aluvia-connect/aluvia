@@ -76,4 +76,41 @@ describe('configDir ALUVIA_HOME', () => {
     assert.strictEqual(fs.existsSync(path.join(home, 'config.json')), true);
     fs.rmSync(home, { recursive: true, force: true });
   });
+
+  test('ensureInstallId is sticky and logout keeps it', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-home-'));
+    process.env.ALUVIA_HOME = home;
+    const { ensureInstallId, getStoredInstallId, saveApiKey, clearApiKey } =
+      await import('../src/config.js');
+    const first = ensureInstallId();
+    assert.match(first, /^[a-f0-9]{64}$/);
+    assert.strictEqual(ensureInstallId(), first);
+    assert.strictEqual(getStoredInstallId(), first);
+    saveApiKey('tok');
+    assert.strictEqual(clearApiKey(), true);
+    assert.strictEqual(getStoredInstallId(), first);
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  test('upstream persist and parse', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-home-'));
+    process.env.ALUVIA_HOME = home;
+    delete process.env.ALUVIA_UPSTREAM;
+    const { saveUpstream, getStoredUpstream, clearUpstream, parseUpstreamUrl } =
+      await import('../src/config.js');
+    const parsed = saveUpstream('http://user:pass@proxy.example:8080');
+    assert.strictEqual(parsed.host, 'proxy.example');
+    assert.strictEqual(getStoredUpstream()?.includes('proxy.example'), true);
+    assert.strictEqual(clearUpstream(), true);
+    assert.strictEqual(getStoredUpstream(), undefined);
+    assert.throws(() => parseUpstreamUrl('ftp://x'), /Invalid upstream/);
+    process.env.ALUVIA_UPSTREAM = 'http://env-proxy.example:9000';
+    assert.match(getStoredUpstream() ?? '', /env-proxy\.example/);
+    delete process.env.ALUVIA_UPSTREAM;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
 });

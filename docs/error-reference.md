@@ -9,6 +9,7 @@ A complete reference for all error classes, error codes, and troubleshooting gui
   - [MissingApiKeyError](#missingapikeyerror)
   - [InvalidApiKeyError](#invalidapikeyerror)
   - [ApiError](#apierror)
+  - [PaymentRequiredError](#paymentrequirederror)
   - [ProxyStartError](#proxystarterror)
   - [ConnectError](#connecterror)
 - [Error handling patterns](#error-handling-patterns)
@@ -21,10 +22,11 @@ A complete reference for all error classes, error codes, and troubleshooting gui
 
 ```
 Error
-├── MissingApiKeyError    — API key not provided or empty
+├── MissingApiKeyError    — API key not provided or empty (and no installId/upstream)
 ├── InvalidApiKeyError    — API key rejected by server (401/403)
 ├── ApiError              — General API failures (non-auth)
-│   └── statusCode?       — HTTP status code (if available)
+│   ├── statusCode?       — HTTP status code (if available)
+│   └── PaymentRequiredError — HTTP 402, trial/paid balance exhausted
 ├── ProxyStartError       — Local proxy failed to start
 └── ConnectError          — CDP connection to browser session failed
 ```
@@ -37,11 +39,11 @@ All error classes use `Object.setPrototypeOf(this, ClassName.prototype)` to ensu
 
 ### MissingApiKeyError
 
-Thrown when the `apiKey` is not provided, is empty, or contains only whitespace.
+Thrown when neither `apiKey` nor `installId` is provided to `AluviaApi`, or when `AluviaClient` is constructed with none of `apiKey`, `installId`, or `upstream`.
 
 **Thrown by:** `AluviaClient` constructor, `AluviaApi` constructor
 
-**Default message:** `"Aluvia connection apiKey is required"`
+**Default message:** `"Aluvia connection apiKey is required"` (client also accepts `installId` / `upstream`)
 
 **When it happens:**
 
@@ -100,6 +102,7 @@ Thrown for general API errors — non-2xx responses (other than 401/403), malfor
 | `400` | Bad request — invalid parameters |
 | `404` | Resource not found |
 | `408` | Request timed out (from `AbortController`) |
+| `402` | Payment required — thrown as `PaymentRequiredError` |
 | `422` | Validation error — check the message for field-level details |
 | `500` | Server error |
 
@@ -119,6 +122,41 @@ await api.account.connections.create({ rules: "invalid" });
 ```
 
 **Fix:** Check `error.statusCode` and `error.message` for specific guidance. For 422 errors, the message includes validation details.
+
+---
+
+### PaymentRequiredError
+
+Thrown when the Aluvia API returns HTTP 402 — trial or paid `balance_gb` is 0. Extends `ApiError` (`statusCode: 402`).
+
+**Thrown by:** `AluviaApi` account connection create/get/update, `AluviaClient.start()`, `ConfigManager.init()`
+
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `code` | `"payment_required"` | Stable error code |
+| `claimUrl` | `string \| null` | Dashboard URL for `aluvia auth` (usually `/cli-auth`) |
+| `statusCode` | `402` | Inherited from `ApiError` |
+
+**When it happens:**
+
+```ts
+const api = new AluviaApi({ installId: process.env.ALUVIA_INSTALL_ID });
+await api.account.connections.create({}); // throws PaymentRequiredError when balance is 0
+```
+
+**Fix:** Run `aluvia auth` and buy data, or `aluvia proxy upstream <url>`. Do not mint a second trial.
+
+The CLI prints:
+
+```json
+{
+  "error": "Trial data is used up. Run `aluvia auth` to sign in and buy data, or `aluvia proxy upstream <url>` to use your own proxy.",
+  "code": "payment_required",
+  "claim_url": "https://dashboard.aluvia.io/cli-auth"
+}
+```
 
 ---
 
@@ -185,6 +223,7 @@ import {
   AluviaClient,
   MissingApiKeyError,
   InvalidApiKeyError,
+  PaymentRequiredError,
   ApiError,
   ProxyStartError,
   ConnectError,
@@ -201,6 +240,8 @@ try {
   } else if (error instanceof InvalidApiKeyError) {
     // Authentication failed
     console.error("Invalid API key. Check your credentials.");
+  } else if (error instanceof PaymentRequiredError) {
+    console.error("Buy data or set a BYO proxy:", error.claimUrl);
   } else if (error instanceof ProxyStartError) {
     // Local proxy failed to start
     console.error("Proxy failed:", error.message);
@@ -284,15 +325,19 @@ Some errors include additional context:
 
 ## Common errors and troubleshooting
 
+### `payment_required` / Trial data is used up
+
+**Context:** `proxy start` / `setup`, `session start`, connection PATCH after trial or paid balance hits 0
+
+**Fix:** Have a human run `aluvia auth` (open the printed link, sign up, buy data) or `aluvia proxy upstream http://user:pass@host:port`. The CLI keeps the same install id; do not wipe `$ALUVIA_HOME` just to get another trial.
+
+---
+
 ### `No API key found. Run \`aluvia auth\` to log in, or set ALUVIA_API_KEY.`
 
-**Context:** CLI commands (and MCP tools that wrap the CLI)
+**Context:** Internal daemon spawn with neither a token, install id, nor BYO upstream (should not happen on the public `proxy start` / `session start` path)
 
-**Fix:** Run `aluvia auth` on the machine running the CLI, or set the environment variable:
-
-```bash
-export ALUVIA_API_KEY="your-api-key"
-```
+**Fix:** Run `aluvia proxy setup` (creates an install id), `aluvia auth`, or set `ALUVIA_API_KEY` / `ALUVIA_UPSTREAM`.
 
 ---
 

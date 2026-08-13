@@ -2,7 +2,7 @@
 
 import type { GatewayProtocol, LogLevel } from './types.js';
 import { Logger } from './logger.js';
-import { InvalidApiKeyError, ApiError } from '../errors.js';
+import { InvalidApiKeyError, ApiError, PaymentRequiredError } from '../errors.js';
 import { requestCore } from '../api/request.js';
 import { isRecord, throwIfAuthError } from '../api/apiUtils.js';
 import { normalizeRules } from './rules.js';
@@ -89,6 +89,8 @@ function toValidationErrors(value: unknown): string[] | null {
  */
 export type ConfigManagerOptions = {
   apiKey: string;
+  installId?: string;
+  localOnly?: boolean;
   apiBaseUrl: string;
   pollIntervalMs: number;
   gatewayProtocol: GatewayProtocol;
@@ -126,6 +128,7 @@ export class ConfigManager {
   private readonly logger: Logger;
   private readonly options: ConfigManagerOptions;
   private readonly strict: boolean;
+  private localOnly: boolean;
 
   private accountConnectionId: number | undefined;
   private pollInFlight = false;
@@ -139,6 +142,26 @@ export class ConfigManager {
     this.options = options;
     this.logger = new Logger(options.logLevel);
     this.strict = options.strict ?? true;
+    this.localOnly = options.localOnly ?? false;
+  }
+
+  applyLocalUpstream(raw: RawProxyConfig, rules: string[] = []): void {
+    this.config = {
+      rawProxy: raw,
+      rules,
+      normalizedRules: normalizeRules(rules),
+      sessionId: null,
+      targetGeo: null,
+      etag: null,
+    };
+    this.localOnly = true;
+  }
+
+  private requestAuth() {
+    return {
+      apiKey: this.options.apiKey,
+      installId: this.options.installId,
+    };
   }
 
   /**
@@ -149,6 +172,10 @@ export class ConfigManager {
    * @throws ApiError for other API errors
    */
   async init(): Promise<void> {
+    if (this.localOnly) {
+      return;
+    }
+
     if (this.options.connectionId) {
       this.accountConnectionId = this.options.connectionId;
       this.logger.info(`Using account connection API (connection id: ${this.accountConnectionId})`);
@@ -156,7 +183,7 @@ export class ConfigManager {
       try {
         result = await requestCore({
           apiBaseUrl: this.options.apiBaseUrl,
-          apiKey: this.options.apiKey,
+          ...this.requestAuth(),
           method: 'GET',
           path: `/account/connections/${this.accountConnectionId}`,
         });
@@ -166,7 +193,7 @@ export class ConfigManager {
         throw new ApiError(`Failed to fetch account connection config: ${msg}`);
       }
 
-      throwIfAuthError(result.status);
+      throwIfAuthError(result.status, result.body);
 
       if (result.status === 200 && result.body) {
         this.config = this.buildConfigFromAny(result.body, result.etag);
@@ -183,13 +210,13 @@ export class ConfigManager {
     try {
       const created = await requestCore({
         apiBaseUrl: this.options.apiBaseUrl,
-        apiKey: this.options.apiKey,
+        ...this.requestAuth(),
         method: 'POST',
         path: '/account/connections',
         body: {},
       });
 
-      throwIfAuthError(created.status);
+      throwIfAuthError(created.status, created.body);
 
       if ((created.status === 200 || created.status === 201) && created.body) {
         const createdResponse = toAccountConnectionApiResponse(created.body);
@@ -215,6 +242,7 @@ export class ConfigManager {
       this.logger.warn(`${msg}; continuing without config (strict=false)`);
       return;
     } catch (err) {
+      if (err instanceof PaymentRequiredError) throw err;
       if (err instanceof InvalidApiKeyError) throw err;
       if (err instanceof ApiError) {
         if (this.strict) throw err;
@@ -238,6 +266,10 @@ export class ConfigManager {
   startPolling(): void {
     if (this.options.pollIntervalMs === 0) {
       this.logger.debug('Config polling disabled (pollIntervalMs=0)');
+      return;
+    }
+
+    if (this.localOnly) {
       return;
     }
 
@@ -285,6 +317,31 @@ export class ConfigManager {
   }
 
   async setConfig(body: Record<string, unknown>): Promise<ConnectionNetworkConfig | null> {
+    if (this.localOnly) {
+      if (body['session_id'] !== undefined || body['target_geo'] !== undefined) {
+        throw new ApiError('rotate-ip and set-geo require the Aluvia network. Run `aluvia auth` or unset your custom upstream.');
+      }
+      const current = this.config;
+      const rules = Array.isArray(body['rules'])
+        ? (body['rules'] as string[])
+        : (current?.rules ?? []);
+      this.config = {
+        rawProxy: current?.rawProxy ?? {
+          protocol: this.options.gatewayProtocol,
+          host: this.options.gatewayHost ?? 'gateway.aluvia.io',
+          port: this.options.gatewayPort,
+          username: '',
+          password: '',
+        },
+        rules,
+        normalizedRules: normalizeRules(rules),
+        sessionId: current?.sessionId ?? null,
+        targetGeo: current?.targetGeo ?? null,
+        etag: current?.etag ?? null,
+      };
+      return this.config;
+    }
+
     if (this.accountConnectionId == null || !Number.isFinite(this.accountConnectionId)) {
       throw new ApiError('Cannot update config: no account connection ID. Ensure init() succeeds first.');
     }
@@ -295,7 +352,7 @@ export class ConfigManager {
     try {
       result = await requestCore({
         apiBaseUrl: this.options.apiBaseUrl,
-        apiKey: this.options.apiKey,
+        ...this.requestAuth(),
         method: 'PATCH',
         path: `/account/connections/${this.accountConnectionId}`,
         body,
@@ -306,7 +363,7 @@ export class ConfigManager {
       throw new ApiError(`Failed to update account connection config: ${msg}`);
     }
 
-    throwIfAuthError(result.status);
+    throwIfAuthError(result.status, result.body);
 
     if (result.status === 200 && result.body) {
       this.config = this.buildConfigFromAny(result.body, result.etag);
@@ -341,7 +398,7 @@ export class ConfigManager {
     try {
       const result = await requestCore({
         apiBaseUrl: this.options.apiBaseUrl,
-        apiKey: this.options.apiKey,
+        ...this.requestAuth(),
         method: 'GET',
         path: `/account/connections/${this.accountConnectionId}`,
         ifNoneMatch: this.config.etag,

@@ -29,10 +29,25 @@ export type PlaywrightProxySettings = {
  */
 export type AluviaClientOptions = {
   /**
-   * Required: user API apiKey (Bearer).
-   * This is the apiKey for a single Aluvia user/agent.
+   * Account API token (Bearer). Optional when `installId` or `upstream` is set.
    */
-  apiKey: string;
+  apiKey?: string;
+
+  /**
+   * CLI trial install id. Sent as X-Aluvia-Install-Id when no apiKey is set.
+   */
+  installId?: string;
+
+  /**
+   * Bring-your-own upstream proxy. Skips the Aluvia API.
+   */
+  upstream?: {
+    protocol: GatewayProtocol;
+    host: string;
+    port: number;
+    username?: string;
+    password?: string;
+  };
 
   /**
    * Optional: base URL for the Aluvia API.

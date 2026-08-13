@@ -27,8 +27,9 @@ ALU="$ROOT/packages/cli/dist/esm/cli.js"
 Use `node "$ALU"` if `aluvia` is not on PATH. `help --json` must list `proxy setup`. Home is `/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`. Do not export `ALUVIA_HOME` unless you need a different directory.
 
 ```bash
-aluvia auth status          # else: aluvia auth  (human approves on their laptop)
-aluvia proxy setup
+aluvia proxy setup          # trial via install id; no human
+# if {"code":"payment_required"}: tell the human to run `aluvia auth`
+#    (they open the printed link, sign up, buy data) OR `aluvia proxy upstream <url>`
 ```
 
 ## Attach Chrome

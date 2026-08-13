@@ -1,5 +1,6 @@
 import {
   AluviaClient,
+  PaymentRequiredError,
   writeLock,
   readLock,
   removeLock,
@@ -10,7 +11,7 @@ import {
 } from '@aluvia/sdk';
 import type { LockDetection, BlockDetectionResult } from '@aluvia/sdk';
 import { output } from './cli.js';
-import { resolveApiKey } from './api-helpers.js';
+import { resolveCredential } from './api-helpers.js';
 import { getCliLaunch } from './cli-path.js';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -75,10 +76,15 @@ export function handleOpen({
     removeLock(session);
   }
 
-  // Require API key (env var, falling back to the key stored by `aluvia auth`)
-  const apiKey = resolveApiKey();
-  if (!apiKey) {
-    output({ error: 'No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.' }, 1);
+  const cred = resolveCredential();
+  if (cred.kind === 'byo') {
+    output(
+      {
+        error:
+          'session start needs the Aluvia network. Run `aluvia proxy upstream --clear`, then retry or `aluvia auth`.',
+      },
+      1,
+    );
   }
 
   // Spawn a detached child process that runs the daemon
@@ -108,7 +114,11 @@ export function handleOpen({
     child = spawn(launch.execPath, [...launch.prefixArgs, launch.script, ...args], {
       detached: true,
       stdio: ['ignore', out, out],
-      env: { ...process.env, ALUVIA_API_KEY: apiKey },
+      env: {
+        ...process.env,
+        ...(cred.kind === 'token' ? { ALUVIA_API_KEY: cred.apiKey } : {}),
+        ...(cred.kind === 'install' ? { ALUVIA_INSTALL_ID: cred.installId } : {}),
+      },
     });
     child.unref();
   } catch (err: any) {
@@ -134,6 +144,20 @@ export function handleOpen({
         // Early exit if daemon process died
         if (child.pid && !isProcessAlive(child.pid)) {
           clearInterval(poll);
+          const dead = readLock(session);
+          if (dead?.code === 'payment_required') {
+            removeLock(session);
+            output(
+              {
+                browserSession: session,
+                error: dead.error ?? 'Trial data is used up.',
+                code: 'payment_required',
+                claim_url: dead.claimUrl ?? null,
+                logFile,
+              },
+              1,
+            );
+          }
           removeLock(session);
           output(
             {
@@ -195,7 +219,11 @@ export async function handleOpenDaemon({
   disableBlockDetection,
   run,
 }: OpenOptions): Promise<void> {
-  const apiKey = process.env.ALUVIA_API_KEY!;
+  const apiKey = (process.env.ALUVIA_API_KEY ?? '').trim() || undefined;
+  const installId = (process.env.ALUVIA_INSTALL_ID ?? '').trim().toLowerCase() || undefined;
+  if (!apiKey && !installId) {
+    throw new Error('No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.');
+  }
 
   const blockDetectionEnabled = !disableBlockDetection;
 
@@ -217,6 +245,7 @@ export async function handleOpenDaemon({
 
   const client = new AluviaClient({
     apiKey,
+    installId,
     startPlaywright: true,
     ...(connectionId != null ? { connectionId } : {}),
     headless: headless ?? true,
@@ -231,7 +260,25 @@ export async function handleOpenDaemon({
       : { enabled: false },
   });
 
-  const connection = await client.start();
+  let connection: Awaited<ReturnType<AluviaClient['start']>>;
+  try {
+    connection = await client.start();
+  } catch (err) {
+    if (err instanceof PaymentRequiredError) {
+      writeLock(
+        {
+          pid: process.pid,
+          session: sessionName,
+          ready: false,
+          error: err.message,
+          code: 'payment_required',
+          claimUrl: err.claimUrl,
+        },
+        sessionName,
+      );
+    }
+    throw err;
+  }
 
   // Write early lock so parent knows daemon is alive
   writeLock(

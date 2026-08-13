@@ -70,8 +70,11 @@ export class AluviaClient {
 
   constructor(options: AluviaClientOptions) {
     const apiKey = String(options.apiKey ?? '').trim();
-    if (!apiKey) {
-      throw new MissingApiKeyError('Aluvia apiKey is required');
+    const installId = String(options.installId ?? '')
+      .trim()
+      .toLowerCase();
+    if (!apiKey && !installId && !options.upstream) {
+      throw new MissingApiKeyError('Aluvia apiKey, installId, or upstream is required');
     }
 
     const strict = options.strict ?? true;
@@ -94,6 +97,8 @@ export class AluviaClient {
     // Create ConfigManager
     this.configManager = new ConfigManager({
       apiKey,
+      installId: installId || undefined,
+      localOnly: Boolean(options.upstream),
       apiBaseUrl,
       pollIntervalMs,
       gatewayProtocol,
@@ -104,11 +109,22 @@ export class AluviaClient {
       strict,
     });
 
+    if (options.upstream) {
+      this.configManager.applyLocalUpstream({
+        protocol: options.upstream.protocol,
+        host: options.upstream.host,
+        port: options.upstream.port,
+        username: options.upstream.username ?? '',
+        password: options.upstream.password ?? '',
+      });
+    }
+
     // Create ProxyServer
     this.proxyServer = new ProxyServer(this.configManager, { logLevel });
 
     this.api = new AluviaApi({
-      apiKey,
+      apiKey: apiKey || (options.upstream ? 'local-upstream' : undefined),
+      installId: installId || undefined,
       apiBaseUrl,
       timeoutMs,
     });

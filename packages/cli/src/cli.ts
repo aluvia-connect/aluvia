@@ -10,7 +10,7 @@ import { handleAuth } from './auth.js';
 import { handleGeos } from './geos.js';
 import { handleProxy } from './proxy.js';
 import { handleProxyDaemon } from './proxy-daemon.js';
-import { validateSessionName } from '@aluvia/sdk';
+import { PaymentRequiredError, validateSessionName } from '@aluvia/sdk';
 import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
 
 export function output(data: Record<string, unknown>, exitCode = 0): never {
@@ -24,6 +24,9 @@ export function output(data: Record<string, unknown>, exitCode = 0): never {
 function printHelp(toStderr = false): void {
   const log = toStderr ? console.error : console.log;
   log('Aluvia CLI\n');
+  log(
+    'A first proxy or session command starts a free trial (no API key). When the trial is used up, run `aluvia auth` or `aluvia proxy upstream <url>`.\n',
+  );
   log('Usage:');
   log('  aluvia session start <url> [options]       Start a browser session');
   log('  aluvia session close [options]              Stop a browser session');
@@ -40,7 +43,8 @@ function printHelp(toStderr = false): void {
   log('  aluvia proxy rotate-ip                       Rotate the sticky upstream IP');
   log('  aluvia proxy set-geo <geo>                   Set or clear target geo');
   log('  aluvia proxy attach                          Point the GUI browser at the local proxy');
-  log('  aluvia proxy setup                           Start proxyd and attach in one step\n');
+  log('  aluvia proxy setup                           Start proxyd and attach in one step');
+  log('  aluvia proxy upstream <url>                  Use your own proxy (no Aluvia account)\n');
   log('  aluvia account                              Show account info');
   log('  aluvia account usage [options]              Show usage stats');
   log('  aluvia geos                                 List available geos\n');
@@ -75,6 +79,7 @@ function printHelp(toStderr = false): void {
   log('  --end <ISO8601>            End date filter\n');
   log('Environment:');
   log('  ALUVIA_API_KEY             Optional. Takes precedence over the key stored by `aluvia auth`.');
+  log('  ALUVIA_UPSTREAM            Optional. Bring-your-own proxy URL (skips Aluvia auth).');
   log(
     '  ALUVIA_HOME                Optional. Default /workspace/.aluvia when /workspace exists, else ~/.aluvia.',
   );
@@ -226,6 +231,11 @@ export function buildHelpJson(): {
         options: [],
       },
       {
+        command: 'proxy upstream <url>',
+        description: 'Use your own proxy instead of Aluvia (or --clear)',
+        options: [{ flag: '--clear', description: 'Remove the saved upstream' }],
+      },
+      {
         command: 'proxy setup',
         description: 'Start the daemon and attach the GUI browser',
         options: [
@@ -257,7 +267,7 @@ export function buildHelpJson(): {
       },
       {
         command: 'auth',
-        description: 'Log in and store your API key (open the printed link in any browser)',
+        description: 'Log in to claim a trial or buy data (open the printed link in any browser)',
         options: [],
       },
       {
@@ -276,7 +286,13 @@ export function buildHelpJson(): {
         options: [{ flag: '--json', description: 'Output help as JSON' }],
       },
     ],
-    environment: ['ALUVIA_API_KEY', 'ALUVIA_HOME', 'ALUVIA_PROXY_PORT', 'ALUVIA_PROXY_CONTROL_PORT'],
+    environment: [
+      'ALUVIA_API_KEY',
+      'ALUVIA_HOME',
+      'ALUVIA_UPSTREAM',
+      'ALUVIA_PROXY_PORT',
+      'ALUVIA_PROXY_CONTROL_PORT',
+    ],
   };
 }
 
@@ -369,6 +385,16 @@ const entry = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).hre
 const isCli = entry === import.meta.url;
 if (isCli) {
   main().catch((err) => {
+    if (err instanceof PaymentRequiredError) {
+      output(
+        {
+          error: err.message,
+          code: 'payment_required',
+          claim_url: err.claimUrl,
+        },
+        1,
+      );
+    }
     output({ error: err.message }, 1);
   });
 }

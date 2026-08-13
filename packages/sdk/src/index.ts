@@ -13,7 +13,14 @@ export { connect } from './connect.js';
 export type { ConnectResult } from './connect.js';
 
 // Public error classes
-export { MissingApiKeyError, InvalidApiKeyError, ApiError, ProxyStartError, ConnectError } from './errors.js';
+export {
+  MissingApiKeyError,
+  InvalidApiKeyError,
+  ApiError,
+  PaymentRequiredError,
+  ProxyStartError,
+  ConnectError,
+} from './errors.js';
 
 // Session lock utilities (used by CLI)
 export {

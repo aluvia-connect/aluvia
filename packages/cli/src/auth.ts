@@ -1,5 +1,5 @@
 import { AluviaApi } from '@aluvia/sdk';
-import { getStoredApiKey, saveApiKey, clearApiKey } from './config.js';
+import { getStoredApiKey, getStoredInstallId, getStoredUpstream, saveApiKey, clearApiKey } from './config.js';
 import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
 
 const API_URL = 'https://api.aluvia.io';
@@ -50,10 +50,14 @@ function delay(ms: number): Promise<void> {
 async function runAuth(): Promise<never> {
   let init: DeviceInit;
   try {
+    const installId = getStoredInstallId();
     const response = await fetch(`${API_URL}/auth/cli/init`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: `aluvia-cli@${process.platform}` }),
+      body: JSON.stringify({
+        label: `aluvia-cli@${process.platform}`,
+        ...(installId ? { install_id: installId } : {}),
+      }),
     });
     if (!response.ok) throw new Error(`init failed (HTTP ${response.status})`);
     init = (await response.json()) as DeviceInit;
@@ -110,12 +114,23 @@ async function runAuth(): Promise<never> {
 function runStatus(): never {
   const envKey = (process.env.ALUVIA_API_KEY ?? '').trim();
   if (envKey) {
-    return authOutput({ authenticated: true, source: 'env' });
+    return authOutput({ authenticated: true, source: 'env', provider: 'aluvia' });
   }
   if (getStoredApiKey()) {
-    return authOutput({ authenticated: true, source: 'config', configFile: STORED_KEY_LOCATION });
+    return authOutput({
+      authenticated: true,
+      source: 'config',
+      provider: 'aluvia',
+      configFile: STORED_KEY_LOCATION,
+    });
   }
-  return authOutput({ authenticated: false });
+  if (getStoredUpstream()) {
+    return authOutput({ authenticated: false, provider: 'custom' });
+  }
+  if (getStoredInstallId()) {
+    return authOutput({ authenticated: false, provider: 'aluvia', trial: true });
+  }
+  return authOutput({ authenticated: false, provider: 'none' });
 }
 
 function runLogout(): never {

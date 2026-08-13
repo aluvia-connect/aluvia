@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { isProcessAlive } from '@aluvia/sdk';
-import { resolveApiKey } from './api-helpers.js';
+import { resolveCredential } from './api-helpers.js';
+import { clearUpstream, saveUpstream } from './config.js';
 import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
@@ -29,7 +30,7 @@ import {
 
 const NOT_RUNNING = 'proxyd is not running. Run `aluvia proxy start`.';
 const CONTROL_TIMEOUT = 'proxyd did not respond. Run `aluvia proxy status`.';
-const NO_API_KEY = 'No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.';
+const BYO_NETWORK = 'This command needs the Aluvia network. Run `aluvia proxy upstream --clear`, then `aluvia auth`.';
 
 function parsePositiveInt(raw: string | undefined): number | undefined {
   if (raw == null || raw.trim() === '') return undefined;
@@ -138,9 +139,11 @@ function failControl(err: unknown): never {
 }
 
 async function startDaemon(args: string[]): Promise<{ json: Record<string, unknown>; healthy: boolean }> {
-  const apiKey = resolveApiKey();
-  if (!apiKey) {
-    output({ error: NO_API_KEY }, 1);
+  let cred: ReturnType<typeof resolveCredential>;
+  try {
+    cred = resolveCredential();
+  } catch (err) {
+    output({ error: (err as Error).message }, 1);
   }
 
   const { dataPort, controlPort, connectionId: flagConnectionId } = parseStartArgs(args);
@@ -178,7 +181,9 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
       stdio: ['ignore', logFd, logFd],
       env: {
         ...process.env,
-        ALUVIA_API_KEY: apiKey,
+        ...(cred.kind === 'token' ? { ALUVIA_API_KEY: cred.apiKey } : {}),
+        ...(cred.kind === 'install' ? { ALUVIA_INSTALL_ID: cred.installId } : {}),
+        ...(cred.kind === 'byo' ? { ALUVIA_UPSTREAM: cred.upstream.href } : {}),
         ALUVIA_HOME: configDir(),
       },
     });
@@ -201,6 +206,18 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
         try {
           if (child.pid && !isProcessAlive(child.pid)) {
             clearInterval(poll);
+            const dead = readProxyJson();
+            if (dead?.code === 'payment_required') {
+              output(
+                {
+                  error: dead.error ?? 'Trial data is used up.',
+                  code: 'payment_required',
+                  claim_url: dead.claimUrl,
+                  logFile,
+                },
+                1,
+              );
+            }
             output({ error: 'proxyd process exited unexpectedly.', logFile }, 1);
           }
 
@@ -469,6 +486,9 @@ async function handleRouteVerb(verb: 'route' | 'unroute', hostArg: string): Prom
 }
 
 async function handleRotateIp(): Promise<void> {
+  if (resolveCredential().kind === 'byo') {
+    output({ error: BYO_NETWORK }, 1);
+  }
   try {
     const res = await controlRequest('POST', '/rotate-ip', {});
     if (res.status !== 200) output({ error: String(res.json.error ?? 'rotate-ip failed') }, 1);
@@ -478,7 +498,27 @@ async function handleRotateIp(): Promise<void> {
   }
 }
 
+async function handleUpstream(args: string[]): Promise<void> {
+  if (args.includes('--clear')) {
+    clearUpstream();
+    output({ provider: 'none', status: 'cleared' });
+  }
+  const raw = args.find((arg) => !arg.startsWith('-'));
+  if (!raw) {
+    output({ error: 'Usage: aluvia proxy upstream <url> | aluvia proxy upstream --clear' }, 1);
+  }
+  try {
+    const parsed = saveUpstream(raw);
+    output({ provider: 'custom', upstreamHost: parsed.host });
+  } catch (err) {
+    output({ error: (err as Error).message }, 1);
+  }
+}
+
 async function handleSetGeo(args: string[]): Promise<void> {
+  if (resolveCredential().kind === 'byo') {
+    output({ error: BYO_NETWORK }, 1);
+  }
   const clear = args.includes('--clear');
   const geo = args.find((arg) => arg !== '--clear');
   if (clear === Boolean(geo)) {
@@ -521,6 +561,9 @@ export async function handleProxy(args: string[]): Promise<void> {
   }
   if (subcommand === 'setup') {
     return handleSetup(args.slice(1));
+  }
+  if (subcommand === 'upstream') {
+    return handleUpstream(args.slice(1));
   }
   output({ error: `Unknown proxy subcommand: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
 }

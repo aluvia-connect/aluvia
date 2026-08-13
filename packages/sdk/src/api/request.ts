@@ -9,7 +9,8 @@ export type RequestQuery = Record<
 
 export type RequestCoreOptions = {
   apiBaseUrl: string;
-  apiKey: string;
+  apiKey?: string;
+  installId?: string;
   method: HttpMethod;
   path: string;
   query?: RequestQuery;
@@ -67,11 +68,18 @@ export async function requestCore(options: RequestCoreOptions): Promise<RequestC
     throw new Error('globalThis.fetch is not available; Node 18+ is required');
   }
 
+  const apiKey = (options.apiKey ?? '').trim();
+  const installId = (options.installId ?? '').trim().toLowerCase();
+
   const headers: Record<string, string> = {
     Accept: 'application/json',
-    Authorization: `Bearer ${options.apiKey}`,
     ...(options.headers ?? {}),
   };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  } else if (installId) {
+    headers['X-Aluvia-Install-Id'] = installId;
+  }
 
   if (options.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch;
 

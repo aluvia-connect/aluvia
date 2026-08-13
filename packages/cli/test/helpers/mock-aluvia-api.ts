@@ -12,10 +12,12 @@ export type MockConnection = {
 export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promise<{
   url: string;
   state: MockConnection;
-  requests: Array<{ method: string; url: string }>;
+  requests: Array<{ method: string; url: string; headers: http.IncomingHttpHeaders }>;
+  setPaymentRequired: (value: boolean) => void;
   close: () => Promise<void>;
 }> {
-  const requests: Array<{ method: string; url: string }> = [];
+  const requests: Array<{ method: string; url: string; headers: http.IncomingHttpHeaders }> = [];
+  let paymentRequired = false;
   const state: MockConnection = {
     id: seed?.id ?? 3449,
     session_id: seed?.session_id ?? null,
@@ -39,7 +41,7 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
 
   const server = http.createServer((req, res) => {
     const url = req.url ?? '';
-    requests.push({ method: req.method ?? '', url });
+    requests.push({ method: req.method ?? '', url, headers: req.headers });
     const send = (status: number, body: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json', etag: '"t1"' });
       res.end(JSON.stringify(body));
@@ -53,6 +55,16 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
       });
     };
 
+    if (paymentRequired && url.startsWith('/account/connections')) {
+      return send(402, {
+        success: false,
+        error: {
+          code: 'payment_required',
+          message: 'Trial data is used up. Run `aluvia auth` to sign in and buy data, or `aluvia proxy upstream <url>` to use your own proxy.',
+          claim_url: 'https://dashboard.aluvia.io/cli-auth',
+        },
+      });
+    }
     if (req.method === 'POST' && url === '/account/connections') {
       return send(201, envelope());
     }
@@ -83,6 +95,9 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
     url,
     state,
     requests,
+    setPaymentRequired: (value: boolean) => {
+      paymentRequired = value;
+    },
     close: () =>
       new Promise((resolve) => {
         server.close(() => resolve());

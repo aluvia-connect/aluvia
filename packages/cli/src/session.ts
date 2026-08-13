@@ -3,7 +3,7 @@ import { handleOpen } from './open.js';
 import type { OpenOptions } from './open.js';
 import { handleClose } from './close.js';
 import { listSessions } from '@aluvia/sdk';
-import { requireApi, resolveSession, requireConnectionId } from './api-helpers.js';
+import { requireApi, resolveSession, requireConnectionId, outputIfPaymentRequired } from './api-helpers.js';
 import { output } from './cli.js';
 
 export type ParsedSessionArgs = {
@@ -206,7 +206,12 @@ async function handleSessionRotateIp(args: string[]): Promise<void> {
   const api = requireApi();
 
   const newSessionId = crypto.randomUUID().replace(/-/g, '');
-  await api.account.connections.patch(connId, { session_id: newSessionId });
+  try {
+    await api.account.connections.patch(connId, { session_id: newSessionId });
+  } catch (err) {
+    outputIfPaymentRequired(err);
+    throw err;
+  }
 
   return output({
     browserSession: session,
@@ -254,7 +259,12 @@ async function handleSessionSetGeo(args: string[]): Promise<void> {
   const api = requireApi();
 
   const targetGeo = clear ? null : geo!.trim();
-  await api.account.connections.patch(connId, { target_geo: targetGeo });
+  try {
+    await api.account.connections.patch(connId, { target_geo: targetGeo });
+  } catch (err) {
+    outputIfPaymentRequired(err);
+    throw err;
+  }
 
   return output({
     browserSession: session,
@@ -303,7 +313,13 @@ async function handleSessionSetRules(args: string[]): Promise<void> {
   const api = requireApi();
 
   // Fetch current rules
-  const conn = await api.account.connections.get(connId);
+  let conn;
+  try {
+    conn = await api.account.connections.get(connId);
+  } catch (err) {
+    outputIfPaymentRequired(err);
+    throw err;
+  }
   const currentRules: string[] = conn?.rules ?? [];
 
   let newRules: string[];

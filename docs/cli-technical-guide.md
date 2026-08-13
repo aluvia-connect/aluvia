@@ -6,6 +6,7 @@ A comprehensive reference for the Aluvia CLI — a JSON-output command-line inte
 
 - [Overview](#overview)
 - [Installation and setup](#installation-and-setup)
+- [Credentials](#credentials)
 - [Output format](#output-format)
 - [Command reference](#command-reference)
   - [session start](#session-start)
@@ -21,6 +22,7 @@ A comprehensive reference for the Aluvia CLI — a JSON-output command-line inte
   - [auth](#auth)
   - [auth status](#auth-status)
   - [auth logout](#auth-logout)
+  - [proxy upstream](#proxy-upstream)
   - [help](#help)
 - [Connecting to a running browser](#connecting-to-a-running-browser)
   - [Using --run](#using---run)
@@ -51,7 +53,9 @@ Both point to the same entry point. All commands output JSON to stdout and use e
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ALUVIA_API_KEY` | No | Optional override for your Aluvia account API key. If unset, the CLI uses the key stored by `aluvia auth` in `~/.aluvia/config.json`. |
+| `ALUVIA_API_KEY` | No | Paid-account override. Wins over the key stored by `aluvia auth`. Not required for the trial. |
+| `ALUVIA_UPSTREAM` | No | Bring-your-own proxy URL (`http(s)://user:pass@host:port`). Skips Aluvia auth. Never auto-read from `HTTPS_PROXY`. |
+| `ALUVIA_HOME` | No | Config directory. Default `/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`. |
 
 ---
 
@@ -63,13 +67,7 @@ npm install @aluvia/sdk playwright
 
 Requires Node.js 18+. The `playwright` dependency is required for browser session commands.
 
-**Authenticate (recommended for headless/remote servers):**
-
-```bash
-aluvia auth
-```
-
-This prints a link and confirmation code to stderr. Open the link in any browser, approve the code, and the CLI stores your API key in `~/.aluvia/config.json`.
+The first `proxy setup` / `session start` starts a **free trial** with no login. After the trial, run `aluvia auth` (device flow: open the printed link, sign up or sign in, buy data) or `aluvia proxy upstream <url>`.
 
 **Or set an API key directly (CI/scripts):**
 
@@ -82,6 +80,18 @@ Verify the CLI is available:
 ```bash
 aluvia help
 ```
+
+---
+
+## Credentials
+
+Three ways to run. The CLI never prints `installId` or `apiKey`.
+
+1. **Trial** — `ensureInstallId()` writes `$ALUVIA_HOME/install_id` (64 hex) on first use and sends `X-Aluvia-Install-Id`. No Sanctum token.
+2. **Paid Aluvia** — `aluvia auth` stores `apiKey`. Bearer wins if both a key and an install id exist. `auth logout` clears the key only.
+3. **BYO** — `aluvia proxy upstream` / `ALUVIA_UPSTREAM`. Local daemon only; `rotate-ip`, `set-geo`, `account`, and `geos` error.
+
+Resolver order: BYO → env/stored `apiKey` → install id. `auth status` does not mint. Trial-only is `{ authenticated: false, provider: "aluvia", trial: true }`. When `balance_gb` is 0, connection APIs return **402** `payment_required` with `claim_url`. Wiping `$ALUVIA_HOME` creates a new install id (and a new trial).
 
 ---
 
@@ -206,9 +216,13 @@ Missing URL:
 { "error": "URL is required. Usage: aluvia session start <url> [options]" }
 ```
 
-Missing API key:
+Trial used up:
 ```json
-{ "error": "No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY." }
+{
+  "error": "Trial data is used up. Run `aluvia auth` to sign in and buy data, or `aluvia proxy upstream <url>` to use your own proxy.",
+  "code": "payment_required",
+  "claim_url": "https://dashboard.aluvia.io/cli-auth"
+}
 ```
 
 **Examples:**
@@ -681,7 +695,7 @@ aluvia geos
 
 ### `auth`
 
-Logs in via the device-code flow and stores your API key in `~/.aluvia/config.json`. Designed for headless and remote servers: the CLI polls the API while you approve in any browser.
+Logs in via the device-code flow and stores your API key in `$ALUVIA_HOME/config.json`. The CLI sends the stored `install_id` on init so the dashboard can merge the trial user onto the signed-in account. Designed for headless and remote servers: the CLI polls the API while you approve in any browser.
 
 ```bash
 aluvia auth
@@ -721,6 +735,7 @@ aluvia auth status
 {
   "authenticated": true,
   "source": "config",
+  "provider": "aluvia",
   "configFile": "~/.aluvia/config.json"
 }
 ```
@@ -728,20 +743,32 @@ aluvia auth status
 **Output (authenticated via env var):**
 
 ```json
-{ "authenticated": true, "source": "env" }
+{ "authenticated": true, "source": "env", "provider": "aluvia" }
 ```
 
-**Output (not authenticated):**
+**Output (trial, no token):**
 
 ```json
-{ "authenticated": false }
+{ "authenticated": false, "provider": "aluvia", "trial": true }
+```
+
+**Output (BYO upstream):**
+
+```json
+{ "authenticated": false, "provider": "custom" }
+```
+
+**Output (nothing stored):**
+
+```json
+{ "authenticated": false, "provider": "none" }
 ```
 
 ---
 
 ### `auth logout`
 
-Removes the stored API key from `~/.aluvia/config.json`.
+Removes the stored API key from `$ALUVIA_HOME/config.json`. Keeps `installId` and any saved upstream.
 
 ```bash
 aluvia auth logout
@@ -755,6 +782,25 @@ aluvia auth logout
   "configFile": "~/.aluvia/config.json"
 }
 ```
+
+---
+
+### `proxy upstream`
+
+Saves a bring-your-own upstream proxy. The local daemon then routes `proxy route` hosts through that URL instead of the Aluvia gateway. No Aluvia API calls.
+
+```bash
+aluvia proxy upstream http://user:pass@host:port
+aluvia proxy upstream --clear
+```
+
+**Success output:**
+
+```json
+{ "provider": "custom", "upstreamHost": "host" }
+```
+
+Userinfo is not printed. `--clear` returns `{ "provider": "none", "status": "cleared" }`. `rotate-ip` / `set-geo` / `account` / `geos` then require clearing the upstream first.
 
 ---
 
@@ -1091,7 +1137,7 @@ All errors produce JSON output to stdout with exit code 1.
 
 | Error | When |
 |-------|------|
-| `No API key found. Run \`aluvia auth\` to log in, or set ALUVIA_API_KEY.` | API key not set (no env var and no stored config). |
+| `Trial data is used up...` (`code: payment_required`) | Trial or paid balance is 0. Run `aluvia auth` or `aluvia proxy upstream`. |
 | `URL is required. Usage: aluvia session start <url> [options]` | Missing URL argument for `session start`. |
 | `Invalid --connection-id: '...' must be a positive integer.` | Bad connection ID value. |
 | `Invalid session name. Use only letters, numbers, hyphens, and underscores.` | Invalid characters in `--browser-session`. |

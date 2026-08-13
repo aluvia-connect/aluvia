@@ -7,7 +7,8 @@ import type { AluviaApiRequestArgs } from './apiUtils.js';
 export type { AluviaApiRequestArgs };
 
 export type AluviaApiOptions = {
-  apiKey: string;
+  apiKey?: string;
+  installId?: string;
   apiBaseUrl?: string;
   timeoutMs?: number;
   fetch?: typeof fetch;
@@ -15,6 +16,7 @@ export type AluviaApiOptions = {
 
 export class AluviaApi {
   private readonly apiKey: string;
+  private readonly installId?: string;
   private readonly apiBaseUrl: string;
   private readonly timeoutMs?: number;
   private readonly fetchImpl?: typeof fetch;
@@ -24,11 +26,15 @@ export class AluviaApi {
 
   constructor(options: AluviaApiOptions) {
     const apiKey = String(options.apiKey ?? '').trim();
-    if (!apiKey) {
-      throw new MissingApiKeyError('Aluvia apiKey is required');
+    const installId = String(options.installId ?? '')
+      .trim()
+      .toLowerCase();
+    if (!apiKey && !installId) {
+      throw new MissingApiKeyError('Aluvia apiKey or installId is required');
     }
 
     this.apiKey = apiKey;
+    this.installId = installId || undefined;
     this.apiBaseUrl = options.apiBaseUrl ?? 'https://api.aluvia.io/v1';
     this.timeoutMs = options.timeoutMs;
     this.fetchImpl = options.fetch;
@@ -44,7 +50,8 @@ export class AluviaApi {
       }) => {
         return await requestCore({
           apiBaseUrl: this.apiBaseUrl,
-          apiKey: this.apiKey,
+          apiKey: this.apiKey || undefined,
+          installId: this.installId,
           method: args.method,
           path: args.path,
           query: args.query,
@@ -66,7 +73,8 @@ export class AluviaApi {
   ): Promise<{ status: number; etag: string | null; body: unknown | null }> {
     return await requestCore({
       apiBaseUrl: this.apiBaseUrl,
-      apiKey: this.apiKey,
+      apiKey: this.apiKey || undefined,
+      installId: this.installId,
       method: args.method,
       path: args.path,
       query: args.query,

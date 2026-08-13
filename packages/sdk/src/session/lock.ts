@@ -80,6 +80,9 @@ export type LockData = {
   blockDetection?: boolean;
   autoUnblock?: boolean;
   lastDetection?: LockDetection;
+  error?: string;
+  code?: string;
+  claimUrl?: string | null;
 };
 
 export function writeLock(data: LockData, sessionName?: string): void {

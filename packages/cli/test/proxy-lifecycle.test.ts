@@ -14,6 +14,8 @@ const ENV_KEYS = [
   'ALUVIA_HOME',
   'ALUVIA_API_KEY',
   'ALUVIA_API_BASE_URL',
+  'ALUVIA_UPSTREAM',
+  'ALUVIA_INSTALL_ID',
   'ALUVIA_PROXY_PORT',
   'ALUVIA_PROXY_CONTROL_PORT',
 ] as const;
@@ -50,6 +52,8 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     process.env.ALUVIA_HOME = home;
     process.env.ALUVIA_API_KEY = 'test-key';
     process.env.ALUVIA_API_BASE_URL = api.url;
+    delete process.env.ALUVIA_UPSTREAM;
+    delete process.env.ALUVIA_INSTALL_ID;
     delete process.env.ALUVIA_PROXY_PORT;
     delete process.env.ALUVIA_PROXY_CONTROL_PORT;
   });
@@ -77,14 +81,38 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     }
   });
 
-  test('start without an API key', async () => {
+  test('start without an API key uses install id', async () => {
     delete process.env.ALUVIA_API_KEY;
     const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(
-      result.data.error,
-      'No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.',
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    const id = fs.readFileSync(path.join(home, 'install_id'), 'utf8').trim();
+    assert.match(id, /^[a-f0-9]{64}$/);
+    assert.ok(
+      api.requests.some(
+        (req) =>
+          req.method === 'POST' &&
+          req.url === '/account/connections' &&
+          req.headers['x-aluvia-install-id'] === id,
+      ),
+      `expected install-id header, got ${JSON.stringify(api.requests)}`,
     );
+  });
+
+  test('start with BYO upstream does not call the Aluvia API', async () => {
+    delete process.env.ALUVIA_API_KEY;
+    process.env.ALUVIA_UPSTREAM = 'http://user:pass@127.0.0.1:9';
+    const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.deepStrictEqual(api.requests, []);
+  });
+
+  test('start maps 402 to payment_required', async () => {
+    delete process.env.ALUVIA_API_KEY;
+    api.setPaymentRequired(true);
+    const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.data.code, 'payment_required');
+    assert.strictEqual(result.data.claim_url, 'https://dashboard.aluvia.io/cli-auth');
   });
 
   test('start writes proxy.json + proxy.log under ALUVIA_HOME', async () => {

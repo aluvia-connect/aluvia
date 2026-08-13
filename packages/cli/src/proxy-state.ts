@@ -32,6 +32,9 @@ export type ProxyJson = {
   targetGeo: string | null;
   rules: string[];
   attach: ProxyAttachState;
+  error?: string | null;
+  code?: string | null;
+  claimUrl?: string | null;
 };
 
 export function defaultAttach(_home?: string): ProxyAttachState {

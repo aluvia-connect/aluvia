@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { AluviaClient, isLoopbackHostname } from '@aluvia/sdk';
+import { AluviaClient, PaymentRequiredError, isLoopbackHostname } from '@aluvia/sdk';
 import { configDir } from './config.js';
 import { createControlServer } from './proxy-control-server.js';
 import {
@@ -17,7 +17,15 @@ export type ProxyDaemonOptions = {
   dataPort: number;
   controlPort: number;
   connectionId?: number;
-  apiKey: string;
+  apiKey?: string;
+  installId?: string;
+  upstream?: {
+    protocol: 'http' | 'https';
+    host: string;
+    port: number;
+    username?: string;
+    password?: string;
+  };
   apiBaseUrl?: string;
   gatewayHost?: string;
   gatewayPort?: number;
@@ -55,8 +63,22 @@ export async function handleProxyDaemon(args: string[]): Promise<void> {
     }
   }
 
-  const apiKey = (process.env.ALUVIA_API_KEY ?? '').trim();
-  if (!apiKey) {
+  const apiKey = (process.env.ALUVIA_API_KEY ?? '').trim() || undefined;
+  const installId = (process.env.ALUVIA_INSTALL_ID ?? '').trim().toLowerCase() || undefined;
+  const upstreamRaw = (process.env.ALUVIA_UPSTREAM ?? '').trim();
+  let upstream: ProxyDaemonOptions['upstream'];
+  if (upstreamRaw) {
+    const url = new URL(upstreamRaw);
+    const protocol = url.protocol === 'https:' ? 'https' : 'http';
+    upstream = {
+      protocol,
+      host: url.hostname,
+      port: url.port ? Number(url.port) : protocol === 'https' ? 443 : 80,
+      ...(url.username ? { username: decodeURIComponent(url.username) } : {}),
+      ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
+    };
+  }
+  if (!apiKey && !installId && !upstream) {
     throw new Error('No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.');
   }
 
@@ -68,7 +90,9 @@ export async function handleProxyDaemon(args: string[]): Promise<void> {
     dataPort,
     controlPort,
     ...(connectionId != null ? { connectionId } : {}),
-    apiKey,
+    ...(apiKey ? { apiKey } : {}),
+    ...(installId ? { installId } : {}),
+    ...(upstream ? { upstream } : {}),
     ...(apiBaseUrl ? { apiBaseUrl } : {}),
     ...(gatewayHost ? { gatewayHost } : {}),
     ...(gatewayPort != null ? { gatewayPort } : {}),
@@ -83,6 +107,8 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
 
   const client = new AluviaClient({
     apiKey: opts.apiKey,
+    installId: opts.installId,
+    upstream: opts.upstream,
     startPlaywright: false,
     localPort: opts.dataPort,
     logLevel: 'info',
@@ -135,6 +161,25 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     await client.start();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof PaymentRequiredError) {
+      writeProxyJson({
+        pid: process.pid,
+        ready: false,
+        dataPort: opts.dataPort,
+        controlPort: opts.controlPort,
+        proxyUrl,
+        controlUrl,
+        connectionId: opts.connectionId ?? existing?.connectionId ?? null,
+        sessionId: existing?.sessionId ?? null,
+        targetGeo: existing?.targetGeo ?? null,
+        rules: existing?.rules ?? [],
+        attach,
+        error: err.message,
+        code: 'payment_required',
+        claimUrl: err.claimUrl,
+      });
+      throw err;
+    }
     if (message.includes('EADDRINUSE')) {
       throw new Error(`port ${opts.dataPort} in use`);
     }
@@ -147,7 +192,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     await client.updateRules(stripped);
   }
 
-  if (client.getNetworkState().sessionId == null) {
+  if (!opts.upstream && client.getNetworkState().sessionId == null) {
     await client.updateSessionId(crypto.randomUUID().replace(/-/g, ''));
   }
 

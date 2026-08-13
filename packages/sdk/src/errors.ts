@@ -37,6 +37,21 @@ export class ApiError extends Error {
 }
 
 /**
+ * Thrown when the API returns HTTP 402 (trial/paid balance exhausted).
+ */
+export class PaymentRequiredError extends ApiError {
+  public readonly code = 'payment_required';
+  public readonly claimUrl: string | null;
+
+  constructor(message: string, claimUrl?: string | null) {
+    super(message, 402);
+    this.name = 'PaymentRequiredError';
+    this.claimUrl = claimUrl ?? null;
+    Object.setPrototypeOf(this, PaymentRequiredError.prototype);
+  }
+}
+
+/**
  * Thrown when the local proxy server fails to start.
  */
 export class ProxyStartError extends Error {

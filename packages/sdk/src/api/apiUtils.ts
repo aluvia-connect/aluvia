@@ -1,4 +1,4 @@
-import { ApiError, InvalidApiKeyError } from '../errors.js';
+import { ApiError, InvalidApiKeyError, PaymentRequiredError } from '../errors.js';
 import type { ErrorEnvelope, SuccessEnvelope } from './types.js';
 
 export type ApiRequestArgs = {
@@ -49,8 +49,25 @@ export function formatErrorDetails(details: unknown): string {
   }
 }
 
+export function paymentRequiredFromBody(body: unknown): PaymentRequiredError {
+  const maybeError = asErrorEnvelope(body);
+  let claimUrl: string | null = null;
+  if (isRecord(body) && isRecord(body['error']) && typeof body['error']['claim_url'] === 'string') {
+    claimUrl = body['error']['claim_url'];
+  }
+  return new PaymentRequiredError(
+    maybeError?.error.message ??
+      'Trial data is used up. Run `aluvia auth` to sign in and buy data, or `aluvia proxy upstream <url>` to use your own proxy.',
+    claimUrl,
+  );
+}
+
 export function throwForNon2xx(result: ApiRequestResult): never {
   const status = result.status;
+
+  if (status === 402) {
+    throw paymentRequiredFromBody(result.body);
+  }
 
   if (status === 401 || status === 403) {
     throw new InvalidApiKeyError(
@@ -73,7 +90,10 @@ export function throwForNon2xx(result: ApiRequestResult): never {
 
 export type AluviaApiRequestArgs = Omit<ApiRequestArgs, 'etag'>;
 
-export function throwIfAuthError(status: number): void {
+export function throwIfAuthError(status: number, body?: unknown): void {
+  if (status === 402) {
+    throw paymentRequiredFromBody(body ?? null);
+  }
   if (status === 401 || status === 403) {
     throw new InvalidApiKeyError(`Authentication failed with status ${status}`);
   }

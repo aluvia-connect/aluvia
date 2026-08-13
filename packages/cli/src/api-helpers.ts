@@ -1,34 +1,74 @@
-import { AluviaApi, readLock, listSessions, isProcessAlive, removeLock, toLockData } from '@aluvia/sdk';
+import { AluviaApi, PaymentRequiredError, readLock, listSessions, isProcessAlive, removeLock, toLockData } from '@aluvia/sdk';
 import type { LockData } from '@aluvia/sdk';
 import { output } from './cli.js';
-import { getStoredApiKey } from './config.js';
+import {
+  ensureInstallId,
+  getStoredApiKey,
+  getStoredUpstream,
+  parseUpstreamUrl,
+  type ParsedUpstream,
+} from './config.js';
+
+export type Credential =
+  | { kind: 'byo'; upstream: ParsedUpstream }
+  | { kind: 'token'; apiKey: string }
+  | { kind: 'install'; installId: string };
 
 /**
- * Resolve the API key from the ALUVIA_API_KEY env var, falling back to the key
- * stored by `aluvia auth` (~/.aluvia/config.json). The env var always wins.
+ * BYO upstream wins, then ALUVIA_API_KEY / stored key, then a sticky install id.
  */
+export function resolveCredential(): Credential {
+  const upstreamRaw = getStoredUpstream();
+  if (upstreamRaw) {
+    return { kind: 'byo', upstream: parseUpstreamUrl(upstreamRaw) };
+  }
+  const envKey = (process.env.ALUVIA_API_KEY ?? '').trim();
+  if (envKey) return { kind: 'token', apiKey: envKey };
+  const stored = getStoredApiKey();
+  if (stored) return { kind: 'token', apiKey: stored };
+  return { kind: 'install', installId: ensureInstallId() };
+}
+
+/** @deprecated Use resolveCredential(). Kept for call sites that only need a token. */
 export function resolveApiKey(): string | undefined {
   const envKey = (process.env.ALUVIA_API_KEY ?? '').trim();
   if (envKey) return envKey;
   return getStoredApiKey();
 }
 
-/**
- * Create an AluviaApi instance from the resolved API key.
- * Calls output() and exits if no key is available.
- */
 export function requireApi(): AluviaApi {
-  const apiKey = resolveApiKey();
-  if (!apiKey) {
-    return output({ error: 'No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.' }, 1);
+  const cred = resolveCredential();
+  if (cred.kind === 'byo') {
+    return output(
+      {
+        error:
+          'This command needs the Aluvia network. Run `aluvia proxy upstream --clear`, then `aluvia auth`.',
+      },
+      1,
+    );
   }
-  return new AluviaApi({ apiKey });
+  if (cred.kind === 'token') {
+    return new AluviaApi({ apiKey: cred.apiKey });
+  }
+  return new AluviaApi({ installId: cred.installId });
 }
 
-/**
- * Resolve a session by name or auto-select when only one is running.
- * Calls output() and exits on error (no sessions, ambiguous sessions, stale lock).
- */
+export function paymentRequiredOutput(err: unknown): Record<string, unknown> | null {
+  if (err instanceof PaymentRequiredError) {
+    return {
+      error: err.message,
+      code: 'payment_required',
+      claim_url: err.claimUrl,
+    };
+  }
+  return null;
+}
+
+export function outputIfPaymentRequired(err: unknown): void {
+  const payload = paymentRequiredOutput(err);
+  if (payload) output(payload, 1);
+}
+
 export function resolveSession(sessionName?: string): {
   session: string;
   lock: LockData;
@@ -68,10 +108,6 @@ export function resolveSession(sessionName?: string): {
   return { session: s.session, lock: toLockData(s) };
 }
 
-/**
- * Require a connection ID from lock data.
- * Calls output() and exits if connectionId is missing.
- */
 export function requireConnectionId(lock: LockData, session: string): number {
   if (lock.connectionId == null) {
     return output(

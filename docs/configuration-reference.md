@@ -18,7 +18,10 @@ A complete reference for all configuration options across the Aluvia SDK — con
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ALUVIA_API_KEY` | No (CLI) | — | Optional override for your account API key. The CLI falls back to the key stored by `aluvia auth` in `~/.aluvia/config.json`. For programmatic usage, pass `apiKey` directly to the constructor. |
+| `ALUVIA_API_KEY` | No | — | Paid-account override. Wins over the key stored by `aluvia auth`. Not required for the install-id trial. |
+| `ALUVIA_UPSTREAM` | No | — | Bring-your-own proxy URL (`http(s)://user:pass@host:port`). Skips the Aluvia API. Do not point this at `HTTPS_PROXY` or the local daemon. |
+| `ALUVIA_HOME` | No | `/workspace/.aluvia` if `/workspace` exists, else `~/.aluvia` | CLI config directory (`config.json`, `install_id`, `proxy.json`). |
+| `ALUVIA_INSTALL_ID` | Internal | — | Injected into the proxy/session daemon when the parent is using a trial install id. |
 
 ---
 
@@ -28,8 +31,10 @@ A complete reference for all configuration options across the Aluvia SDK — con
 import { AluviaClient } from "@aluvia/sdk";
 
 const client = new AluviaClient({
-  // Required
-  apiKey: string;
+  // One of apiKey, installId, or upstream
+  apiKey?: string;
+  installId?: string;
+  upstream?: { protocol: "http" | "https"; host: string; port: number; username?: string; password?: string };
 
   // Connection
   connectionId?: number;
@@ -59,15 +64,27 @@ const client = new AluviaClient({
 
 ### Option details
 
-#### `apiKey` (required)
+#### `apiKey`
 
-Your Aluvia account API key. Used as a `Bearer` token for API authentication.
+Account API token. Sent as `Authorization: Bearer`. Optional when `installId` or `upstream` is set.
 
 ```ts
-apiKey: process.env.ALUVIA_API_KEY!
+apiKey: process.env.ALUVIA_API_KEY
 ```
 
-Throws `MissingApiKeyError` if empty or whitespace.
+Throws `MissingApiKeyError` if none of `apiKey`, `installId`, or `upstream` is set.
+
+---
+
+#### `installId`
+
+CLI trial id (64 hex). Sent as `X-Aluvia-Install-Id` when `apiKey` is absent. If both are set, Bearer wins.
+
+---
+
+#### `upstream`
+
+Bring-your-own proxy. Skips `ConfigManager` API calls (`localOnly`). Used by `aluvia proxy upstream`.
 
 ---
 
@@ -193,7 +210,8 @@ Logging verbosity:
 import { AluviaApi } from "@aluvia/sdk";
 
 const api = new AluviaApi({
-  apiKey: string;       // Required
+  apiKey?: string;      // Bearer token
+  installId?: string;   // X-Aluvia-Install-Id (trial)
   apiBaseUrl?: string;  // Default: "https://api.aluvia.io/v1"
   timeoutMs?: number;   // Default: 30000
   fetch?: typeof fetch; // Default: globalThis.fetch
@@ -202,7 +220,8 @@ const api = new AluviaApi({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `apiKey` | `string` | **required** | Account API token |
+| `apiKey` | `string` | one of `apiKey` / `installId` | Account API token (Bearer) |
+| `installId` | `string` | one of `apiKey` / `installId` | Trial install id header |
 | `apiBaseUrl` | `string` | `"https://api.aluvia.io/v1"` | API base URL |
 | `timeoutMs` | `number` | `30000` | Request timeout (ms) |
 | `fetch` | `typeof fetch` | `globalThis.fetch` | Custom fetch implementation |

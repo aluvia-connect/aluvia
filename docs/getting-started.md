@@ -17,7 +17,7 @@ A step-by-step guide to installing, configuring, and running your first Aluvia-p
 ## Prerequisites
 
 - **Node.js 18+** — Aluvia uses native `fetch`, `AbortController`, and ES modules
-- **An Aluvia API key** — sign up at [dashboard.aluvia.io](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)
+- No API key is required to start. The first CLI command creates a sticky install id and uses a free trial. After the trial, sign in with `aluvia auth` (or set `ALUVIA_API_KEY`) to buy data, or point the daemon at your own proxy with `aluvia proxy upstream`.
 
 ---
 
@@ -33,11 +33,15 @@ npm install @aluvia/sdk playwright
 
 ## Configuration
 
-**CLI (recommended):** log in once and store your key locally:
+**CLI (default):** run a command. The CLI writes `$ALUVIA_HOME/install_id` (`/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`) and sends it as `X-Aluvia-Install-Id`. No human, no token.
+
+**Paid Aluvia:** log in once after the trial (or immediately if you already have an account):
 
 ```bash
 aluvia auth
 ```
+
+Open the printed link, sign up or sign in, approve the code, then buy data if balance is zero. The CLI stores the account token in `$ALUVIA_HOME/config.json` and keeps the install id.
 
 **Or set an API key as an environment variable** (common for CI and scripts):
 
@@ -45,13 +49,15 @@ aluvia auth
 export ALUVIA_API_KEY="your-api-key"
 ```
 
-Or create a `.env` file in your project root:
+**Bring your own proxy** (skips Aluvia auth and the gateway):
 
-```
-ALUVIA_API_KEY=your-api-key
+```bash
+aluvia proxy upstream http://user:pass@host:port
+# or
+export ALUVIA_UPSTREAM="http://user:pass@host:port"
 ```
 
-The CLI uses `ALUVIA_API_KEY` when set; otherwise it reads the key from `~/.aluvia/config.json` after `aluvia auth`. In programmatic mode, pass the key directly to the constructor.
+Do not point `ALUVIA_UPSTREAM` at `HTTPS_PROXY` / the local daemon — that loops. Resolver order is BYO upstream, then `ALUVIA_API_KEY` / stored key, then install id.
 
 ---
 
@@ -59,16 +65,19 @@ The CLI uses `ALUVIA_API_KEY` when set; otherwise it reads the key from `~/.aluv
 
 The CLI is the fastest way to get started. It outputs JSON to stdout, making it ideal for AI agent frameworks.
 
-### 0. Authenticate
+### 0. Start the local proxy (trial)
 
 ```bash
-aluvia auth
+aluvia proxy setup
 ```
 
-Open the printed link in any browser and confirm the code. Then verify:
+No login. If stdout is `{"code":"payment_required",...}`, tell a human to run `aluvia auth` (open the printed link, sign up, buy data) or `aluvia proxy upstream <url>`.
+
+Verify:
 
 ```bash
 aluvia auth status
+# trial only: { "authenticated": false, "provider": "aluvia", "trial": true }
 ```
 
 ### 1. Launch a browser session
