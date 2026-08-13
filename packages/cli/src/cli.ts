@@ -8,6 +8,8 @@ import type { ParsedSessionArgs } from './session.js';
 import { handleAccount } from './account.js';
 import { handleAuth } from './auth.js';
 import { handleGeos } from './geos.js';
+import { handleProxy } from './proxy.js';
+import { handleProxyDaemon } from './proxy-daemon.js';
 import { validateSessionName } from '@aluvia/sdk';
 import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
 
@@ -213,6 +215,12 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0] ?? '';
 
+  // Internal: --proxy-daemon mode (spawned by `proxy start` in detached child)
+  if (command === '--proxy-daemon') {
+    await handleProxyDaemon(args.slice(1));
+    return;
+  }
+
   // Internal: --daemon mode (spawned by `session start` in detached child)
   if (command === '--daemon') {
     const parsed = parseDaemonArgs(args.slice(1));
@@ -257,6 +265,9 @@ async function main(): Promise<void> {
   } else if (command === 'geos') {
     if (wantsHelp) printHelpAndExit(args);
     await handleGeos();
+  } else if (command === 'proxy') {
+    if (wantsHelp) printHelpAndExit(args);
+    await handleProxy(args.slice(1));
   } else if (command === 'help' || command === '--help' || command === '-h' || command === '') {
     printHelpAndExit(args);
   } else {

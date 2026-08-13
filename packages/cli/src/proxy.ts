@@ -1,0 +1,292 @@
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import { isProcessAlive } from '@aluvia/sdk';
+import { resolveApiKey } from './api-helpers.js';
+import { output } from './cli.js';
+import { getCliLaunch } from './cli-path.js';
+import { configDir } from './config.js';
+import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
+import {
+  DEFAULT_CONTROL_PORT,
+  DEFAULT_DATA_PORT,
+  readProxyJson,
+  writeProxyJson,
+  type ProxyJson,
+} from './proxy-state.js';
+
+const NOT_RUNNING = 'proxyd is not running. Run `aluvia proxy start`.';
+const CONTROL_TIMEOUT = 'proxyd did not respond. Run `aluvia proxy status`.';
+const NO_API_KEY = 'No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.';
+
+function parsePositiveInt(raw: string | undefined): number | undefined {
+  if (raw == null || raw.trim() === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
+function parsePortFlag(value: string, flag: string): number {
+  const parsed = parsePositiveInt(value);
+  if (parsed == null) {
+    output({ error: `Invalid ${flag}: '${value}' must be a positive integer.` }, 1);
+  }
+  return parsed;
+}
+
+function parseStartArgs(args: string[]): { dataPort: number; controlPort: number } {
+  let dataPort = parsePositiveInt(process.env.ALUVIA_PROXY_PORT) ?? DEFAULT_DATA_PORT;
+  let controlPort = parsePositiveInt(process.env.ALUVIA_PROXY_CONTROL_PORT) ?? DEFAULT_CONTROL_PORT;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--port' && args[i + 1]) {
+      dataPort = parsePortFlag(args[i + 1], '--port');
+      i++;
+    } else if (args[i] === '--control-port' && args[i + 1]) {
+      controlPort = parsePortFlag(args[i + 1], '--control-port');
+      i++;
+    }
+  }
+  return { dataPort, controlPort };
+}
+
+function isLive(state: ProxyJson | null): state is ProxyJson {
+  return state != null && state.pid != null && isProcessAlive(state.pid);
+}
+
+function statusFields(state: ProxyJson, healthy: boolean, extra?: Record<string, unknown>) {
+  return {
+    pid: state.pid,
+    proxyUrl: state.proxyUrl,
+    controlUrl: state.controlUrl,
+    connectionId: state.connectionId,
+    sessionId: state.sessionId,
+    targetGeo: state.targetGeo,
+    rules: state.rules,
+    count: state.rules.length,
+    healthy,
+    attach: state.attach,
+    ...extra,
+  };
+}
+
+function portBusy(port: number): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') resolve(true);
+      else reject(err);
+    });
+    server.listen(port, '127.0.0.1', () => {
+      server.close((closeErr) => {
+        if (closeErr) reject(closeErr);
+        else resolve(false);
+      });
+    });
+  });
+}
+
+function waitForDeath(pid: number, timeoutMs: number): Promise<boolean> {
+  const started = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (!isProcessAlive(pid)) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() - started >= timeoutMs) {
+        resolve(!isProcessAlive(pid));
+        return;
+      }
+      setTimeout(tick, 50);
+    };
+    tick();
+  });
+}
+
+function clearPidReady(state: ProxyJson): void {
+  writeProxyJson({ ...state, pid: null, ready: false });
+}
+
+function failControl(err: unknown): never {
+  if (isControlClientError(err, 'not_running')) {
+    output({ error: NOT_RUNNING }, 1);
+  }
+  if (isControlClientError(err, 'timeout')) {
+    output({ error: CONTROL_TIMEOUT }, 1);
+  }
+  throw err;
+}
+
+async function handleStart(args: string[]): Promise<void> {
+  const apiKey = resolveApiKey();
+  if (!apiKey) {
+    output({ error: NO_API_KEY }, 1);
+  }
+
+  const { dataPort, controlPort } = parseStartArgs(args);
+  const existing = readProxyJson();
+  if (isLive(existing)) {
+    try {
+      const { json } = await controlRequest('GET', '/status');
+      const healthy = await bothPortsAccept(existing);
+      output({ ...json, healthy, error: 'proxyd already running' }, 1);
+    } catch {
+      const healthy = await bothPortsAccept(existing).catch(() => false);
+      output({ ...statusFields(existing, healthy), error: 'proxyd already running' }, 1);
+    }
+  }
+
+  if (await portBusy(dataPort)) {
+    output({ error: `port ${dataPort} in use` }, 1);
+  }
+  if (await portBusy(controlPort)) {
+    output({ error: `port ${controlPort} in use` }, 1);
+  }
+
+  const connectionId = existing?.connectionId ?? undefined;
+  const dir = configDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const logFile = path.join(dir, 'proxy.log');
+  const logFd = fs.openSync(logFile, 'a');
+
+  const launch = getCliLaunch();
+  const daemonArgs = [
+    ...launch.prefixArgs,
+    launch.script,
+    '--proxy-daemon',
+    '--port',
+    String(dataPort),
+    '--control-port',
+    String(controlPort),
+    ...(connectionId != null ? ['--connection-id', String(connectionId)] : []),
+  ];
+
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(launch.execPath, daemonArgs, {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+      env: {
+        ...process.env,
+        ALUVIA_API_KEY: apiKey,
+        ALUVIA_HOME: configDir(),
+      },
+    });
+    child.unref();
+  } catch (err: any) {
+    fs.closeSync(logFd);
+    output({ error: `Failed to spawn proxyd: ${err.message}`, logFile }, 1);
+  }
+  fs.closeSync(logFd);
+
+  return new Promise((_resolve, reject) => {
+    let attempts = 0;
+    let inFlight = false;
+    const maxAttempts = 240;
+    const poll = setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
+      attempts++;
+      void (async () => {
+        try {
+          if (child.pid && !isProcessAlive(child.pid)) {
+            clearInterval(poll);
+            output({ error: 'proxyd process exited unexpectedly.', logFile }, 1);
+          }
+
+          const state = readProxyJson();
+          if (state && state.ready) {
+            clearInterval(poll);
+            const healthy = await bothPortsAccept(state);
+            try {
+              const { json } = await controlRequest('GET', '/status');
+              output({ ...json, healthy });
+            } catch {
+              output(statusFields(state, healthy));
+            }
+          }
+
+          if (attempts >= maxAttempts) {
+            clearInterval(poll);
+            const alive = child.pid ? isProcessAlive(child.pid) : false;
+            output(
+              {
+                error: alive
+                  ? 'proxyd is still initializing (timeout).'
+                  : 'proxyd process exited unexpectedly.',
+                logFile,
+              },
+              1,
+            );
+          }
+        } catch (err) {
+          clearInterval(poll);
+          reject(err);
+        } finally {
+          inFlight = false;
+        }
+      })();
+    }, 250);
+  });
+}
+
+async function handleStop(): Promise<void> {
+  const existing = readProxyJson();
+  if (!isLive(existing)) {
+    if (existing) clearPidReady(existing);
+    output({ status: 'stopped' });
+  }
+
+  const pid = existing.pid!;
+  try {
+    await controlRequest('POST', '/stop', {});
+  } catch (err) {
+    if (!isControlClientError(err, 'not_running')) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const dead = await waitForDeath(pid, 10_000);
+  if (!dead) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // ignore
+    }
+    await waitForDeath(pid, 1000);
+  }
+
+  const latest = readProxyJson() ?? existing;
+  clearPidReady(latest);
+  output({ status: 'stopped' });
+}
+
+async function handleStatus(): Promise<void> {
+  try {
+    const { json } = await controlRequest('GET', '/status');
+    const state = readProxyJson();
+    const healthy = state ? await bothPortsAccept(state) : false;
+    output({ ...json, healthy });
+  } catch (err) {
+    failControl(err);
+  }
+}
+
+export async function handleProxy(args: string[]): Promise<void> {
+  const subcommand = args[0];
+  if (subcommand === 'start') {
+    return handleStart(args.slice(1));
+  }
+  if (subcommand === 'stop') {
+    return handleStop();
+  }
+  if (subcommand === 'status') {
+    return handleStatus();
+  }
+  output({ error: `Unknown proxy subcommand: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
+}

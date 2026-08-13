@@ -125,6 +125,22 @@ describe('AluviaClient', () => {
 
     await connection.close();
   });
+
+  test('getNetworkState snapshots ConfigManager', () => {
+    const client = new AluviaClient({ apiKey: 'test-api-key', logLevel: 'silent' });
+    (client as any).configManager.getConfig = () => ({
+      sessionId: 'abc',
+      targetGeo: 'us_ca',
+      rules: ['example.com'],
+    });
+    Object.defineProperty(client, 'connectionId', { get: () => 3449 });
+    assert.deepStrictEqual(client.getNetworkState(), {
+      connectionId: 3449,
+      sessionId: 'abc',
+      targetGeo: 'us_ca',
+      rules: ['example.com'],
+    });
+  });
 });
 
 describe('BlockDetection Integration', () => {

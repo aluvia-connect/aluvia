@@ -19,6 +19,13 @@ import { AluviaApi } from '../api/AluviaApi.js';
 import { BlockDetection, type BlockDetectionResult } from './BlockDetection.js';
 import * as net from 'node:net';
 
+export type NetworkState = {
+  connectionId: number | undefined;
+  sessionId: string | null;
+  targetGeo: string | null;
+  rules: string[];
+};
+
 /**
  * AluviaClient is the main entry point for the Aluvia Client.
  *
@@ -49,6 +56,16 @@ export class AluviaClient {
   /** Read-only access to the connection ID from ConfigManager. */
   get connectionId(): number | undefined {
     return this.configManager.connectionId;
+  }
+
+  getNetworkState(): NetworkState {
+    const config = this.configManager.getConfig();
+    return {
+      connectionId: this.connectionId,
+      sessionId: config?.sessionId ?? null,
+      targetGeo: config?.targetGeo ?? null,
+      rules: config?.rules ?? [],
+    };
   }
 
   constructor(options: AluviaClientOptions) {

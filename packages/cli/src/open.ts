@@ -11,29 +11,11 @@ import {
 import type { LockDetection, BlockDetectionResult } from '@aluvia/sdk';
 import { output } from './cli.js';
 import { resolveApiKey } from './api-helpers.js';
+import { getCliLaunch } from './cli-path.js';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
-
-// Determine the directory of this module at load time
-// @ts-ignore - import.meta.url exists at runtime in ESM
-const thisModuleDir = path.dirname(fileURLToPath(import.meta.url));
-
-/**
- * Get the path to cli.js for spawning daemon processes.
- * Looks in the same directory as this module (works for both dev and installed).
- */
-function getCliScriptPath(): string {
-  // cli.js should be in the same directory as open.js
-  const cliPath = path.join(thisModuleDir, 'cli.js');
-
-  if (fs.existsSync(cliPath)) {
-    return cliPath;
-  }
-
-  throw new Error(`Could not find cli.js at ${cliPath}`);
-}
+import { pathToFileURL } from 'node:url';
 
 export type OpenOptions = {
   url: string;
@@ -122,9 +104,8 @@ export function handleOpen({
 
   let child: ReturnType<typeof spawn>;
   try {
-    // Get the path to cli.js in the same directory as this module
-    const cliPath = getCliScriptPath();
-    child = spawn(process.execPath, [cliPath, ...args], {
+    const launch = getCliLaunch();
+    child = spawn(launch.execPath, [...launch.prefixArgs, launch.script, ...args], {
       detached: true,
       stdio: ['ignore', out, out],
       env: { ...process.env, ALUVIA_API_KEY: apiKey },
