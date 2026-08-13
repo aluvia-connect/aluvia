@@ -333,7 +333,11 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
     proxyUrl: state.proxyUrl,
     extensionPath,
     policyPath: policy.path,
-    instructions: attachInstructions({ extensionPath, policyPath: policy.path }),
+    instructions: attachInstructions({
+      extensionPath,
+      policyPath: policy.path,
+      dataPort,
+    }),
   };
 }
 

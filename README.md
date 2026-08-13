@@ -25,7 +25,7 @@ This repository is organized as a monorepo with three packages:
 - **IP rotation and geo targeting** — rotate IPs or target specific US regions at runtime
 - **REST API wrapper** — manage connections, check usage, and build custom tooling with `AluviaApi`
 
-Computer-use VMs can run a local unauthenticated proxy (`aluvia proxy`) in front of the GUI browser that is already on the machine. Route only the hostnames that block you; signed-in tabs stay on the datacenter IP.
+Computer-use VMs can run a local unauthenticated proxy (`aluvia proxy`) in front of the GUI browser that is already on the machine. Route only the hostnames that block you; signed-in tabs stay on the datacenter IP. Grok Bot install: [skills/aluvia-grok-bot-install/SKILL.md](./skills/aluvia-grok-bot-install/SKILL.md).
 
 ---
 

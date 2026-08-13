@@ -160,7 +160,8 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.ok((result.data.extensionPath as string).length > 0);
     assert.ok(typeof result.data.instructions === 'string');
     assert.ok((result.data.instructions as string).length > 0);
-    assert.ok((result.data.instructions as string).includes('chrome://extensions'));
+    assert.ok((result.data.instructions as string).includes('/etc/opt/chrome/policies/managed'));
+    assert.ok((result.data.instructions as string).includes('chrome://policy'));
   });
 
   test('Attach starts proxyd when down', async () => {
@@ -239,10 +240,12 @@ describe('proxy attach', { concurrency: 1 }, () => {
       ProxyMode: string;
       ProxyServer: string;
       ProxyBypassList: string;
+      QuicAllowed: boolean;
     };
     assert.strictEqual(policy.ProxyMode, 'fixed_servers');
     assert.strictEqual(policy.ProxyServer, `127.0.0.1:${dataPort}`);
     assert.ok(policy.ProxyBypassList.includes('localhost'));
+    assert.strictEqual(policy.QuicAllowed, false);
     assert.ok(typeof result.data.policyPath === 'string');
   });
 

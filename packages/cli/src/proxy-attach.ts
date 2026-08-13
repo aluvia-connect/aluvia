@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { isLoopbackHostname } from '@aluvia/sdk';
 import { controlRequest } from './proxy-control-client.js';
@@ -55,28 +54,26 @@ export type PolicyWriteResult = {
   mtimeMs: number | null;
 };
 
-export function chromeProxyPolicyBody(dataPort: number): Record<string, string> {
+export function chromeProxyPolicyBody(dataPort: number): Record<string, string | boolean> {
   return {
     ProxyMode: 'fixed_servers',
     ProxyServer: `127.0.0.1:${dataPort}`,
     ProxyBypassList: 'localhost,127.0.0.1,::1,<local>',
+    QuicAllowed: false,
   };
 }
 
 function policyDirCandidates(): string[] {
   const override = (process.env.ALUVIA_CHROME_POLICY_DIR ?? '').trim();
   if (override) return [override];
-  // Branded Chrome on Linux only reads /etc/opt/chrome. Home-dir "recommended"
-  // files are writable but ignored — try system dirs first.
+  // Branded Chrome on Linux reads /etc/opt/chrome. Managed is what the
+  // Grok Bot image already uses. Home-dir policy files are ignored — do
+  // not write them (they make setup report a useless policyPath).
   return [
-    '/etc/opt/chrome/policies/recommended',
     '/etc/opt/chrome/policies/managed',
-    '/etc/chromium/policies/recommended',
+    '/etc/opt/chrome/policies/recommended',
     '/etc/chromium/policies/managed',
-    path.join(os.homedir(), '.config/google-chrome/policies/recommended'),
-    path.join(os.homedir(), '.config/google-chrome/policies/managed'),
-    path.join(os.homedir(), '.config/chromium/policies/recommended'),
-    path.join(os.homedir(), '.config/chromium/policies/managed'),
+    '/etc/chromium/policies/recommended',
   ];
 }
 
@@ -110,8 +107,16 @@ export function writeChromeProxyPolicy(dataPort: number): PolicyWriteResult {
     const dest = path.join(dir, filename);
     try {
       if (fs.existsSync(dest)) {
-        const parsed = JSON.parse(fs.readFileSync(dest, 'utf8')) as { ProxyServer?: string };
-        if (parsed.ProxyServer === expected.ProxyServer) {
+        const parsed = JSON.parse(fs.readFileSync(dest, 'utf8')) as {
+          ProxyServer?: string;
+          ProxyMode?: string;
+          QuicAllowed?: boolean;
+        };
+        if (
+          parsed.ProxyServer === expected.ProxyServer &&
+          parsed.ProxyMode === expected.ProxyMode &&
+          parsed.QuicAllowed === false
+        ) {
           return { wrote: false, path: dest, mtimeMs: policyFileMtime(dest) };
         }
       }
@@ -176,34 +181,34 @@ export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs:
 
 export function pickAttachMethod(opts: { policyPath: string | null; gsettings: boolean }): AttachMethod {
   const policyPath = opts.policyPath ?? '';
-  if (
-    policyPath.startsWith('/etc/') ||
-    (process.env.ALUVIA_CHROME_POLICY_DIR ?? '').trim().length > 0
-  ) {
+  if (policyPath.startsWith('/etc/') || (process.env.ALUVIA_CHROME_POLICY_DIR ?? '').trim().length > 0) {
     return 'policy';
   }
   if (opts.gsettings) return 'gsettings';
   return 'extension';
 }
 
-export function attachInstructions(opts: { extensionPath: string; policyPath: string | null }): string {
+export function attachInstructions(opts: {
+  extensionPath: string;
+  policyPath: string | null;
+  dataPort: number;
+}): string {
+  const body = JSON.stringify(chromeProxyPolicyBody(opts.dataPort));
   const parts: string[] = [];
-  if (opts.policyPath) {
-    if (opts.policyPath.startsWith('/etc/')) {
-      parts.push(
-        `Chrome policy written to ${opts.policyPath}. Open chrome://policy → Reload policies, then open a non-localhost page.`,
-      );
-    } else {
-      parts.push(
-        `Wrote ${opts.policyPath} (branded Chrome often ignores home-dir policy). Prefer the unpacked extension.`,
-      );
-    }
+  if (opts.policyPath?.startsWith('/etc/')) {
+    parts.push(
+      `Chrome policy at ${opts.policyPath}. Open chrome://policy → Reload policies. Confirm ProxyMode, ProxyServer, QuicAllowed.`,
+    );
+  } else {
+    parts.push(
+      `Write the policy yourself (this process often cannot sudo): sudo -n mkdir -p /etc/opt/chrome/policies/managed && echo '${body}' | sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json. Then chrome://policy → Reload policies. Confirm ProxyMode, ProxyServer, QuicAllowed. Home-dir policy is ignored. Do not use chrome://settings/system.`,
+    );
   }
   parts.push(
-    `Or open chrome://extensions → enable Developer mode → Load unpacked → select ${opts.extensionPath}`,
+    'Open a new tab to a site, then run `aluvia proxy setup` again. Do not load the unpacked extension unless asked.',
   );
   parts.push(
-    'Then open a new tab to a site (not F5 — Chrome reuses CONNECT tunnels). After `route`/`unroute`, use a new tab the same way.',
+    `After route/unroute: chrome://net-internals/#sockets → Flush socket pools, then a new tab. last-connect must be the routed host. Extension fallback (only if /etc policy cannot be written): chrome://extensions → Developer mode → Load unpacked → ${opts.extensionPath}`,
   );
   return parts.join(' ');
 }

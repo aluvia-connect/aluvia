@@ -177,9 +177,9 @@ aluvia proxy setup
 
 - Default data port: `18787`. Default control port: `18788`.
 - State lives under `ALUVIA_HOME` (default `~/.aluvia`): auth config, `proxy.json`, logs, attach extension, and optional Chrome policy file.
-- Catch-all `*` is refused. Route only the blocked hostname. After `route` / `unroute`, open a **new tab** (Chrome reuses CONNECT tunnels; F5 is not enough).
+- Catch-all `*` is refused. Route only the blocked hostname. After `route` / `unroute`, flush Chrome socket pools (`chrome://net-internals/#sockets`) then open a **new tab**. F5 and a new tab alone reuse CONNECT/QUIC.
 - `setup` starts the daemon and attaches. `ready: true` means the GUI browser has CONNECTed to the local proxy.
-- `attach` / `setup` return `verified` or `needs_ui` (exit 0). On `needs_ui`, follow `instructions` (policy reload and/or load the unpacked extension).
+- `attach` / `setup` return `verified` or `needs_ui` (exit 0). On `needs_ui`, follow `instructions` (write `/etc` Chrome policy; do not load the unpacked extension unless asked).
 
 ## Scripting (`--run`)
 
