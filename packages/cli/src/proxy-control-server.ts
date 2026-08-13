@@ -154,6 +154,29 @@ async function handleRequest(
       return;
     }
 
+    if (method === 'GET' && pathname === '/last-connect') {
+      sendJson(res, 200, { hostname: handlers.getLastConnect?.() ?? null });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/attach-state') {
+      const body = await readJsonBody(req);
+      const status = body.status;
+      if (status !== 'unverified' && status !== 'verified' && status !== 'needs_ui') {
+        sendJson(res, 400, { error: 'invalid attach status' });
+        return;
+      }
+      const attach: ProxyAttachState = {
+        status,
+        method: body.method === 'gsettings' || body.method === 'extension' ? body.method : null,
+        verifiedAt: typeof body.verifiedAt === 'string' ? body.verifiedAt : null,
+        extensionPath: typeof body.extensionPath === 'string' ? body.extensionPath : null,
+      };
+      handlers.setAttach?.(attach);
+      sendJson(res, 200, { attach });
+      return;
+    }
+
     sendJson(res, 404, { error: 'not found' });
   } catch (err) {
     if (err instanceof ControlError) {

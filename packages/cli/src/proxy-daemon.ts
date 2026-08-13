@@ -76,7 +76,7 @@ export async function handleProxyDaemon(args: string[]): Promise<void> {
 
 export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
   const existing = readProxyJson();
-  const attach: ProxyAttachState =
+  let attach: ProxyAttachState =
     existing && existing.dataPort === opts.dataPort ? existing.attach : defaultAttach(configDir());
   const { proxyUrl, controlUrl } = urls(opts.dataPort, opts.controlPort);
 
@@ -89,6 +89,11 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
     ...(opts.gatewayHost ? { gatewayHost: opts.gatewayHost } : {}),
     ...(opts.gatewayPort != null ? { gatewayPort: opts.gatewayPort } : {}),
+  });
+
+  let lastConnect: string | null = null;
+  client.setRequestObserver((hostname) => {
+    lastConnect = hostname;
   });
 
   const persist = (ready: boolean): void => {
@@ -231,6 +236,11 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     },
     stop: () => {
       void shutdown();
+    },
+    getLastConnect: () => lastConnect,
+    setAttach: (next) => {
+      attach = next;
+      persist(true);
     },
   });
 

@@ -30,6 +30,11 @@ export class ProxyServer {
   private static readonly NO_CONFIG_WARN_INTERVAL_MS = 30_000;
   private lastNoConfigWarnAt = 0;
   private suppressedNoConfigWarnCount = 0;
+  private requestObserver: ((hostname: string) => void) | null = null;
+
+  setRequestObserver(fn: ((hostname: string) => void) | null): void {
+    this.requestObserver = fn;
+  }
 
   constructor(configManager: ConfigManager, options?: { logLevel?: LogLevel }) {
     this.configManager = configManager;
@@ -103,6 +108,12 @@ export class ProxyServer {
     port?: number;
     isHttp?: boolean;
   }): { upstreamProxyUrl: string } | undefined {
+    // Extract hostname
+    const hostname = this.extractHostname(params);
+    if (hostname) {
+      this.requestObserver?.(hostname);
+    }
+
     // Get current config
     const config = this.configManager.getConfig();
 
@@ -125,9 +136,6 @@ export class ProxyServer {
       }
       return undefined;
     }
-
-    // Extract hostname
-    const hostname = this.extractHostname(params);
 
     if (!hostname) {
       this.logger.debug('Could not extract hostname, going direct');

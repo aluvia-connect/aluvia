@@ -89,4 +89,38 @@ describe('control server', () => {
     });
     assert.strictEqual(geo.status, 400);
   });
+
+  test('GET /last-connect returns the handler value and POST /attach-state rejects invalid status', async () => {
+    let stored = defaultAttach('/tmp');
+    server = createControlServer({
+      getStatus: () => {
+        throw new Error('unused');
+      },
+      route: async () => ({ rules: [] }),
+      unroute: async () => ({ rules: [] }),
+      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
+      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
+      stop: () => {},
+      getLastConnect: () => 'verify.example',
+      setAttach: (next) => {
+        stored = next;
+      },
+    });
+    const port = await listen(server);
+
+    const last = await fetch(`http://127.0.0.1:${port}/last-connect`);
+    assert.strictEqual(last.status, 200);
+    assert.deepStrictEqual(await last.json(), { hostname: 'verify.example' });
+
+    const bad = await fetch(`http://127.0.0.1:${port}/attach-state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'nope' }),
+    });
+    assert.strictEqual(bad.status, 400);
+
+    const missing = await fetch(`http://127.0.0.1:${port}/nope`);
+    assert.strictEqual(missing.status, 404);
+    assert.strictEqual(stored.status, 'unverified');
+  });
 });

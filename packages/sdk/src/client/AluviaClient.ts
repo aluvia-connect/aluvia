@@ -532,6 +532,10 @@ export class AluviaClient {
     }
   }
 
+  setRequestObserver(fn: ((hostname: string) => void) | null): void {
+    this.proxyServer.setRequestObserver(fn);
+  }
+
   /**
    * Update the filtering rules used by the proxy.
    * @param rules
