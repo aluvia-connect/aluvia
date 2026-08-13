@@ -12,13 +12,13 @@ Do this on **this** computer. Do not run `aluvia session *`. Do not launch a sec
 ## Install
 
 ```bash
-npm i -g aluvia
+npm i -g aluvia-cli
 aluvia setup                # trial via install id; no human
 # if {"code":"payment_required"}: tell the human to run `aluvia auth`
 #    (they open the printed link, sign up, buy data) OR `aluvia upstream <url>`
 ```
 
-If `aluvia` is already on PATH (you just ran `npx aluvia setup`), still run `npm i -g aluvia` so later commands do not need npx. Skip setup if stdout already has `ready: true`. Home is `/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`.
+If `aluvia` is already on PATH (you just ran `npx aluvia-cli setup`), still run `npm i -g aluvia-cli` so later commands do not need npx. Skip setup if stdout already has `ready: true`. Home is `/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`.
 
 ## Attach Chrome
 

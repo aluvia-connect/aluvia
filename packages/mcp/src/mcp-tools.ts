@@ -11,7 +11,7 @@ import {
   handleGeos,
   handleOpen,
   captureOutput,
-} from "aluvia";
+} from "aluvia-cli";
 
 type ToolResult = { data: Record<string, unknown>; isError: boolean };
 

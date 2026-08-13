@@ -35,7 +35,7 @@ describe('proxy skill install', () => {
     assert.match(body, /^name: aluvia$/m);
     assert.ok(!body.includes('aluvia-proxy'));
     assert.ok(body.includes('aluvia route'));
-    assert.ok(body.includes('npm i -g aluvia'));
+    assert.ok(body.includes('npm i -g aluvia-cli'));
     assert.ok(body.includes('policyCommand'));
     assert.ok(body.includes('ready: true'));
     assert.ok(body.includes('Restart required'));

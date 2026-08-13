@@ -1,14 +1,14 @@
-# aluvia
+# aluvia-cli
 
 The official command-line interface for [Aluvia](https://aluvia.io) — launch and manage browser sessions with automatic unblocking, smart routing, and resident proxy daemons.
 
 ## Installation
 
 ```bash
-npm install -g aluvia
+npm install -g aluvia-cli
 ```
 
-Computer-use / Grok Bot: `npx aluvia setup` (or `npm i -g aluvia` then `aluvia setup`). That starts the daemon, attaches Chrome via `/etc` policy, and installs the `aluvia` skill into `~/.agents/skills`.
+Computer-use / Grok Bot: `npx aluvia-cli setup` (or `npm i -g aluvia-cli` then `aluvia setup`). That starts the daemon, attaches Chrome via `/etc` policy, and installs the `aluvia` skill into `~/.agents/skills`.
 
 ## Authentication
 

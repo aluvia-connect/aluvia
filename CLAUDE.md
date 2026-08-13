@@ -5,7 +5,7 @@
 This repository is organized as a monorepo with three packages:
 
 - **packages/sdk/** - Core SDK (`@aluvia/sdk`)
-- **packages/cli/** - Command-line tools (`aluvia`)
+- **packages/cli/** - Command-line tools (`aluvia-cli`, bin `aluvia`)
 - **packages/mcp/** - MCP server (`@aluvia/mcp`)
 
 ## Commands
@@ -57,7 +57,7 @@ docs/                   — Technical guides (API, CLI, client)
 - **Node.js native test runner**: Tests use `node:test` and `node:assert`, NOT Jest/Mocha. Run via tsx loader.
 - **Adapters pattern**: `packages/sdk/src/client/adapters.ts` provides framework-specific proxy configs (`asPlaywright()`, `asPuppeteer()`, `asAxiosConfig()`, etc.).
 - **Error classes use `Object.setPrototypeOf`**: Required for proper `instanceof` checks with TypeScript class inheritance.
-- **Cross-package dependencies**: CLI imports from `@aluvia/sdk`, MCP imports from both `@aluvia/sdk` and `aluvia`.
+- **Cross-package dependencies**: CLI imports from `@aluvia/sdk`, MCP imports from both `@aluvia/sdk` and `aluvia-cli`.
 
 ## Gotchas
 

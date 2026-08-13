@@ -1,5 +1,5 @@
 /**
- * Re-exports for @aluvia/mcp. MCP imports from the `aluvia` package.
+ * Re-exports for @aluvia/mcp. MCP imports from the `aluvia-cli` package.
  */
 
 export { handleSession } from './session.js';

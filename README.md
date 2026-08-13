@@ -12,7 +12,7 @@
 This repository is organized as a monorepo with three packages:
 
 - **[@aluvia/sdk](./packages/sdk)** — Core SDK with `AluviaClient`, `AluviaApi`, framework adapters, and block detection
-- **[aluvia](./packages/cli)** — Command-line tools for browser automation and session management
+- **[aluvia-cli](./packages/cli)** — Command-line tools for browser automation and session management
 - **[@aluvia/mcp](./packages/mcp)** — Model Context Protocol server for AI agent integration
 
 ## Features
@@ -59,7 +59,7 @@ export ALUVIA_API_KEY="your-api-key"
 
 For CLI use:
 ```bash
-npm install -g aluvia
+npm install -g aluvia-cli
 export ALUVIA_API_KEY="your-api-key"
 ```
 

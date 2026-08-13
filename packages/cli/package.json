@@ -1,5 +1,5 @@
 {
-  "name": "aluvia",
+  "name": "aluvia-cli",
   "version": "1.2.0",
   "description": "Aluvia CLI — local proxy daemon, GUI attach, and agent skill for computer-use VMs",
   "license": "MIT",
