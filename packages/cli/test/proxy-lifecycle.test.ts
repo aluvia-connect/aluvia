@@ -114,9 +114,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
       `unexpected create: ${JSON.stringify(api.requests)}`,
     );
     assert.ok(
-      api.requests.some(
-        (req) => req.method === 'GET' && req.url.startsWith('/account/connections/3449'),
-      ),
+      api.requests.some((req) => req.method === 'GET' && req.url.startsWith('/account/connections/3449')),
     );
   });
 

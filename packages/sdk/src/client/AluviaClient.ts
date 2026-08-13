@@ -83,8 +83,7 @@ export class AluviaClient {
     }
 
     const apiBaseUrl = options.apiBaseUrl ?? 'https://api.aluvia.io/v1';
-    const pollIntervalMs =
-      options.pollIntervalMs === 0 ? 0 : Math.max(options.pollIntervalMs ?? 5000, 1000);
+    const pollIntervalMs = options.pollIntervalMs === 0 ? 0 : Math.max(options.pollIntervalMs ?? 5000, 1000);
     const timeoutMs = options.timeoutMs;
     const gatewayProtocol: GatewayProtocol = options.gatewayProtocol ?? 'http';
     const gatewayPort = options.gatewayPort ?? (gatewayProtocol === 'https' ? 8443 : 8080);
