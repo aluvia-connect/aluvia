@@ -202,6 +202,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       if (!rules.includes(host)) {
         await client.updateRules([...rules, host]);
       }
+      client.closeConnectionsForHost(host);
       persist(true);
       return { rules: client.getNetworkState().rules };
     },
@@ -211,6 +212,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       if (next.length !== rules.length) {
         await client.updateRules(next);
       }
+      client.closeConnectionsForHost(host);
       persist(true);
       return { rules: client.getNetworkState().rules };
     },

@@ -54,11 +54,22 @@ export type PolicyWriteResult = {
   mtimeMs: number | null;
 };
 
-export function chromeProxyPolicyBody(dataPort: number): Record<string, string | boolean> {
+export type ChromeProxyPolicyBody = {
+  ProxySettings: {
+    ProxyMode: string;
+    ProxyServer: string;
+    ProxyBypassList: string;
+  };
+  QuicAllowed: boolean;
+};
+
+export function chromeProxyPolicyBody(dataPort: number): ChromeProxyPolicyBody {
   return {
-    ProxyMode: 'fixed_servers',
-    ProxyServer: `127.0.0.1:${dataPort}`,
-    ProxyBypassList: 'localhost,127.0.0.1,::1,<local>',
+    ProxySettings: {
+      ProxyMode: 'fixed_servers',
+      ProxyServer: `127.0.0.1:${dataPort}`,
+      ProxyBypassList: 'localhost,127.0.0.1,::1,<local>',
+    },
     QuicAllowed: false,
   };
 }
@@ -108,13 +119,12 @@ export function writeChromeProxyPolicy(dataPort: number): PolicyWriteResult {
     try {
       if (fs.existsSync(dest)) {
         const parsed = JSON.parse(fs.readFileSync(dest, 'utf8')) as {
-          ProxyServer?: string;
-          ProxyMode?: string;
+          ProxySettings?: { ProxyServer?: string; ProxyMode?: string };
           QuicAllowed?: boolean;
         };
         if (
-          parsed.ProxyServer === expected.ProxyServer &&
-          parsed.ProxyMode === expected.ProxyMode &&
+          parsed.ProxySettings?.ProxyServer === expected.ProxySettings.ProxyServer &&
+          parsed.ProxySettings?.ProxyMode === expected.ProxySettings.ProxyMode &&
           parsed.QuicAllowed === false
         ) {
           return { wrote: false, path: dest, mtimeMs: policyFileMtime(dest) };
@@ -197,18 +207,18 @@ export function attachInstructions(opts: {
   const parts: string[] = [];
   if (opts.policyPath?.startsWith('/etc/')) {
     parts.push(
-      `Chrome policy at ${opts.policyPath}. Open chrome://policy → Reload policies. Confirm ProxyMode, ProxyServer, QuicAllowed.`,
+      `Chrome policy at ${opts.policyPath}. Open chrome://policy → Reload policies. Confirm ProxySettings and QuicAllowed.`,
     );
   } else {
     parts.push(
-      `Write the policy yourself (this process often cannot sudo): sudo -n mkdir -p /etc/opt/chrome/policies/managed && echo '${body}' | sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json. Then chrome://policy → Reload policies. Confirm ProxyMode, ProxyServer, QuicAllowed. Home-dir policy is ignored. Do not use chrome://settings/system.`,
+      `Write the policy yourself (this process often cannot sudo): sudo -n mkdir -p /etc/opt/chrome/policies/managed && echo '${body}' | sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json. Then chrome://policy → Reload policies. Confirm ProxySettings and QuicAllowed. Home-dir policy is ignored. Do not use chrome://settings/system.`,
     );
   }
   parts.push(
-    'Open a new tab to a site, then run `aluvia proxy setup` again. Do not load the unpacked extension unless asked.',
+    'Open a new tab to a site, then run `aluvia proxy setup` again. Do not load the unpacked extension unless asked. QuicAllowed needs one Chrome restart at setup.',
   );
   parts.push(
-    `After route/unroute: chrome://net-internals/#sockets → Flush socket pools, then a new tab. last-connect must be the routed host. Extension fallback (only if /etc policy cannot be written): chrome://extensions → Developer mode → Load unpacked → ${opts.extensionPath}`,
+    `After route/unroute, reload the tab (live tunnels for that host are dropped). Extension fallback only if /etc policy cannot be written: chrome://extensions → Load unpacked → ${opts.extensionPath}`,
   );
   return parts.join(' ');
 }

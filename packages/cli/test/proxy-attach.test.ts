@@ -237,14 +237,12 @@ describe('proxy attach', { concurrency: 1 }, () => {
     const policyPath = path.join(policyDir, 'aluvia-proxy.json');
     assert.strictEqual(fs.existsSync(policyPath), true);
     const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8')) as {
-      ProxyMode: string;
-      ProxyServer: string;
-      ProxyBypassList: string;
+      ProxySettings: { ProxyMode: string; ProxyServer: string; ProxyBypassList: string };
       QuicAllowed: boolean;
     };
-    assert.strictEqual(policy.ProxyMode, 'fixed_servers');
-    assert.strictEqual(policy.ProxyServer, `127.0.0.1:${dataPort}`);
-    assert.ok(policy.ProxyBypassList.includes('localhost'));
+    assert.strictEqual(policy.ProxySettings.ProxyMode, 'fixed_servers');
+    assert.strictEqual(policy.ProxySettings.ProxyServer, `127.0.0.1:${dataPort}`);
+    assert.ok(policy.ProxySettings.ProxyBypassList.includes('localhost'));
     assert.strictEqual(policy.QuicAllowed, false);
     assert.ok(typeof result.data.policyPath === 'string');
   });

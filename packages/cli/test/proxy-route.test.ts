@@ -99,6 +99,30 @@ describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () =
     assert.ok(gateway.connects.includes('example.com:443'));
   });
 
+  test('route closes a live CONNECT so the next one can flip to Aluvia', async () => {
+    const held = await new Promise<{ socket: import('net').Socket }>((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1',
+        port: dataPort,
+        method: 'CONNECT',
+        path: 'held.example:443',
+      });
+      req.on('connect', (_res, socket) => resolve({ socket }));
+      req.on('error', reject);
+      req.setTimeout(2000, () => req.destroy(new Error('CONNECT timeout')));
+      req.end();
+    });
+    const closed = new Promise<void>((resolve) => {
+      held.socket.once('close', () => resolve());
+    });
+    const routed = await captureOutput(() => handleProxy(['route', 'held.example']));
+    assert.strictEqual(routed.isError, false, String(routed.data.error ?? ''));
+    await Promise.race([
+      closed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('live CONNECT was not dropped')), 2000)),
+    ]);
+  });
+
   test('unroute goes direct and does not hit the mock gateway', async () => {
     const routed = await captureOutput(() => handleProxy(['route', 'example.com']));
     assert.strictEqual(routed.isError, false, String(routed.data.error ?? ''));

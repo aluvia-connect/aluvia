@@ -7,6 +7,7 @@ declare module 'proxy-chain' {
     hostname?: string;
     port?: number;
     isHttp?: boolean;
+    connectionId?: number | string;
   };
 
   export type PrepareRequestFunctionResult = { upstreamProxyUrl: string } | undefined;
@@ -25,6 +26,10 @@ declare module 'proxy-chain' {
     constructor(options: ServerOptions);
     listen(): Promise<void>;
     close(force?: boolean): Promise<void>;
+    getConnectionIds(): Array<number | string>;
+    closeConnection(connectionId: number | string): void;
+    closeConnections(): void;
+    on(event: 'connectionClosed', listener: (info: { connectionId: number | string }) => void): this;
     server: {
       address(): import('net').AddressInfo | string | null;
     };

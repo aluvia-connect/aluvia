@@ -5,77 +5,68 @@ description: Install Aluvia, attach the GUI Chrome, and send a blocked hostname 
 
 # Aluvia proxy
 
-Local daemon on `127.0.0.1:18787`. Chrome sends all sites there. `aluvia proxy route <host>` sends **that host** through Aluvia. Everything else stays on the VM IP. Same tab, same cookies.
+Local daemon on `127.0.0.1:18787`. `aluvia proxy route <host>` sends that host through Aluvia. Everything else stays on the VM IP. Same tab, same cookies.
 
-Do this on **this** computer (the Grok Bot VM). Do not run `aluvia session *`. Do not launch a second Chrome. Never print the API key.
+Do this on **this** computer. Do not run `aluvia session *`. Do not launch a second Chrome. Never print the API key.
 
 ## Install
 
-```bash
-npm install -g @aluvia/cli@1.2.0
-# if global npm is blocked: npx -y @aluvia/cli@1.2.0
-```
-
-`aluvia help --json` must list `proxy setup`. If it does not, the CLI is too old — install `@aluvia/cli@1.2.0` again, do not clone this repo to compile.
+Published `@aluvia/cli` may still be old. On this VM, build the branch:
 
 ```bash
 if [ -d /workspace ]; then export ALUVIA_HOME=/workspace/.aluvia; fi
-aluvia auth status
-# if not authenticated: aluvia auth  (human approves on their laptop)
-aluvia proxy setup
+ROOT="${HOME}/aluvia"
+if [ ! -d "$ROOT/.git" ]; then
+  git clone --branch feat/grok-bot-proxy-setup --depth 1 https://github.com/aluvia-connect/aluvia.git "$ROOT"
+fi
+cd "$ROOT" && git fetch origin feat/grok-bot-proxy-setup && git checkout feat/grok-bot-proxy-setup && git merge --ff-only origin/feat/grok-bot-proxy-setup
+if [ ! -d node_modules ]; then npm ci; fi
+npm run build:sdk && npm run build:cli
+ALU="$ROOT/packages/cli/dist/esm/cli.js"
 ```
 
-`setup` starts proxyd and writes this skill to `~/.agents/skills/aluvia-proxy` (and `/workspace/.agents/skills` when that tree exists).
+Use `node "$ALU"` if `aluvia` is not on PATH. `help --json` must list `proxy setup`.
+
+```bash
+aluvia auth status          # else: aluvia auth  (human approves on their laptop)
+aluvia proxy setup          # starts proxyd; writes this skill to ~/.agents/skills
+```
 
 ## Attach Chrome
 
-Start proxyd **before** writing `ProxyServer`, or Chrome cannot load pages.
-
-`setup` cannot sudo from Node. Write the policy yourself:
+`setup` cannot sudo from Node. Write policy yourself, then reload policies:
 
 ```bash
-sudo -n mkdir -p /etc/opt/chrome/policies/managed
 sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json <<'EOF'
 {
-  "ProxyMode": "fixed_servers",
-  "ProxyServer": "127.0.0.1:18787",
-  "ProxyBypassList": "localhost,127.0.0.1,::1,<local>",
+  "ProxySettings": {
+    "ProxyMode": "fixed_servers",
+    "ProxyServer": "127.0.0.1:18787",
+    "ProxyBypassList": "localhost,127.0.0.1,::1,<local>"
+  },
   "QuicAllowed": false
 }
 EOF
 ```
 
-If the data port is not `18787`, put that port in `ProxyServer`.
+`chrome://policy` → Reload policies. Confirm `ProxySettings` and `QuicAllowed=false`. Open a new tab. `curl -sS http://127.0.0.1:18788/last-connect` must show a hostname. Run `setup` again until `ready: true`.
 
-`chrome://policy` → Reload policies. Require `ProxyMode`, `ProxyServer`, `QuicAllowed=false`. Then a **new tab** to a site. `curl -sS http://127.0.0.1:18788/last-connect` must show a non-loopback hostname. Run `aluvia proxy setup` again until `ready: true`.
+`QuicAllowed` needs **one Chrome restart** (dock / same profile) or HTTP/3 can skip the proxy. Do that at setup, not mid-task.
 
-Do not load an unpacked extension. Do not use `chrome://settings/system` (no host/port fields). Home-dir Chrome policy is ignored. Remove a leftover Aluvia extension so policy owns proxy.
+Do not load an unpacked extension. Do not use `chrome://settings/system`.
 
 ## Identify a block
 
-A screenshot is a **block** only if it is Cloudflare, Access Denied, CAPTCHA, or unusual traffic. A normal login is not a block. Do not route a host where a login still works.
-
-Read the hostname from the address bar. `www.example.com` is not `example.com`.
+Cloudflare, Access Denied, CAPTCHA, or unusual traffic. Not a login. Do not route a host where a login still works. Use the address-bar hostname (`www.example.com` ≠ `example.com`).
 
 ## Route
 
 ```bash
-aluvia proxy status          # daemon down → setup again
 aluvia proxy route <host>
 ```
 
-Then `chrome://net-internals/#sockets` → **Flush socket pools**, then a **new tab** to that host. F5 and a new tab alone reuse the process-wide CONNECT/QUIC pool.
+Then reload the tab (or a new tab to the same host). `route` drops that host's live CONNECT tunnels; you do not need `chrome://net-internals`.
 
-```bash
-curl -sS http://127.0.0.1:18788/last-connect
-```
+If last-connect is not that host after reload, open one new tab. Exit 1 → stop. Do not `route '*'`. After `unroute`, reload again.
 
-`hostname` must be the host you routed before you trust the page IP. If it is not, flush again and open another new tab.
-
-Parse CLI JSON. Exit 1 → stop and report `error`. Do not `route '*'`. After `unroute`, flush, then a new tab.
-
-If a redirect lands on a new host that is still blocked, route that host too, then flush + new tab.
-
-Terminal `curl`/`node` do not use the GUI proxy. For a shell: `export https_proxy=http://127.0.0.1:18787 http_proxy=http://127.0.0.1:18787`, then `route` the host.
-
-Do not `rotate-ip` unless the human asks. Do not invent MITM, PAC, nftables, or `https://aluvia.io/https://…`. Do not kill the harness Chrome.
+Do not `rotate-ip` unless asked. Do not invent MITM, PAC, nftables, or a hosted rewrite.

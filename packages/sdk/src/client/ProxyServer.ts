@@ -31,9 +31,28 @@ export class ProxyServer {
   private lastNoConfigWarnAt = 0;
   private suppressedNoConfigWarnCount = 0;
   private requestObserver: ((hostname: string) => void) | null = null;
+  private readonly hostConnections = new Map<string, Set<number | string>>();
+  private readonly connectionHosts = new Map<string, string>();
 
   setRequestObserver(fn: ((hostname: string) => void) | null): void {
     this.requestObserver = fn;
+  }
+
+  /**
+   * Drop live CONNECT tunnels for a hostname so the next Chrome request
+   * re-decides Aluvia vs direct. F5 / a new tab is not enough by itself.
+   */
+  closeConnectionsForHost(hostname: string): number {
+    const key = hostname.trim().toLowerCase();
+    if (!key || !this.server) return 0;
+    const ids = this.hostConnections.get(key);
+    if (!ids || ids.size === 0) return 0;
+    let closed = 0;
+    for (const id of [...ids]) {
+      this.server.closeConnection(id);
+      closed += 1;
+    }
+    return closed;
   }
 
   constructor(configManager: ConfigManager, options?: { logLevel?: LogLevel }) {
@@ -60,6 +79,9 @@ export class ProxyServer {
       });
 
       await this.server.listen();
+      this.server.on('connectionClosed', ({ connectionId }) => {
+        this.forgetConnection(connectionId);
+      });
 
       // Get the actual port (especially important when port was 0)
       const address = this.server.server.address() as AddressInfo;
@@ -92,6 +114,8 @@ export class ProxyServer {
       this.logger.info('Proxy server stopped');
     } finally {
       this.server = null;
+      this.hostConnections.clear();
+      this.connectionHosts.clear();
     }
   }
 
@@ -107,10 +131,12 @@ export class ProxyServer {
     hostname?: string;
     port?: number;
     isHttp?: boolean;
+    connectionId?: number | string;
   }): { upstreamProxyUrl: string } | undefined {
     // Extract hostname
     const hostname = this.extractHostname(params);
     if (hostname) {
+      this.trackConnection(hostname, params.connectionId);
       this.requestObserver?.(hostname);
     }
 
@@ -164,6 +190,37 @@ export class ProxyServer {
     this.logger.debug(`Hostname ${hostname} routing through Aluvia`);
 
     return { upstreamProxyUrl };
+  }
+
+  private trackConnection(hostname: string, connectionId: number | string | undefined): void {
+    if (connectionId == null) return;
+    const host = hostname.trim().toLowerCase();
+    if (!host) return;
+    const key = String(connectionId);
+    const prev = this.connectionHosts.get(key);
+    if (prev && prev !== host) {
+      this.hostConnections.get(prev)?.delete(connectionId);
+    }
+    this.connectionHosts.set(key, host);
+    let ids = this.hostConnections.get(host);
+    if (!ids) {
+      ids = new Set();
+      this.hostConnections.set(host, ids);
+    }
+    ids.add(connectionId);
+  }
+
+  private forgetConnection(connectionId: number | string): void {
+    const key = String(connectionId);
+    const host = this.connectionHosts.get(key);
+    this.connectionHosts.delete(key);
+    if (!host) return;
+    const ids = this.hostConnections.get(host);
+    if (!ids) return;
+    ids.delete(connectionId);
+    ids.delete(Number(connectionId));
+    ids.delete(key);
+    if (ids.size === 0) this.hostConnections.delete(host);
   }
 
   /**

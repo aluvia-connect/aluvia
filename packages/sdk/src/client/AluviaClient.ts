@@ -536,6 +536,10 @@ export class AluviaClient {
     this.proxyServer.setRequestObserver(fn);
   }
 
+  closeConnectionsForHost(hostname: string): number {
+    return this.proxyServer.closeConnectionsForHost(hostname);
+  }
+
   /**
    * Update the filtering rules used by the proxy.
    * @param rules
