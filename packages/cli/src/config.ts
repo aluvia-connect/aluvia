@@ -15,6 +15,8 @@ interface AluviaConfig {
 }
 
 export function configDir(): string {
+  const fromEnv = (process.env.ALUVIA_HOME ?? '').trim();
+  if (fromEnv) return path.resolve(fromEnv);
   return path.join(os.homedir(), '.aluvia');
 }
 

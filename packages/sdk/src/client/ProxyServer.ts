@@ -7,6 +7,7 @@ import type { LogLevel } from './types.js';
 import { Logger } from './logger.js';
 import { ProxyStartError } from '../errors.js';
 import { shouldProxy, shouldProxyNormalized } from './rules.js';
+import { isLoopbackHostname } from './loopback.js';
 
 /**
  * Result of starting the proxy server.
@@ -130,6 +131,11 @@ export class ProxyServer {
 
     if (!hostname) {
       this.logger.debug('Could not extract hostname, going direct');
+      return undefined;
+    }
+
+    if (isLoopbackHostname(hostname)) {
+      this.logger.debug(`Hostname ${hostname} is loopback, going direct`);
       return undefined;
     }
 

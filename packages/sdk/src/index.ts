@@ -5,6 +5,9 @@
 export { AluviaClient } from './client/AluviaClient.js';
 export { AluviaApi } from './api/AluviaApi.js';
 
+// Loopback hostname check (always direct in ProxyServer)
+export { isLoopbackHostname } from './client/loopback.js';
+
 // Connect helper
 export { connect } from './connect.js';
 export type { ConnectResult } from './connect.js';
