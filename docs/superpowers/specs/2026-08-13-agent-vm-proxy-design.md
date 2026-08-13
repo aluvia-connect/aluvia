@@ -1,7 +1,7 @@
 # Agent-VM proxy surface
 
 Date: 2026-08-13  
-Status: approved design (awaiting implementation plan)
+Status: approved design (implementation plan: `docs/superpowers/plans/2026-08-13-agent-vm-proxy.md`)
 
 Aluvia becomes opt-in mobile egress for a computer-use VM. The agent browses on the datacenter IP. When a screenshot shows a block, it routes **that hostname** through Aluvia and reloads. Signed-in Gmail / Slack / Salesforce stay direct. Same tab, same origin, same cookies, different egress IP.
 
