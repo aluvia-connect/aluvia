@@ -54,14 +54,14 @@ Parse the JSON.
 
 - `ready: true` → done. Do not change Chrome proxy settings again.
 - `ready: false` / `status: needs_ui` → follow `instructions`:
-  1. If `policyPath` is set: open `chrome://policy` → Reload policies.
-  2. Else: `chrome://extensions` → Developer mode → Load unpacked → `extensionPath`.
+  1. If `policyPath` starts with `/etc/`: open `chrome://policy` → Reload policies. A path under `~/.config/.../policies` is often ignored by branded Chrome — skip to the extension.
+  2. `chrome://extensions` → Developer mode → Load unpacked → `extensionPath`.
   3. Open a **new tab** to a non-localhost site (not F5).
-  4. Run `aluvia proxy setup` again.
+  4. Confirm `curl -sS http://127.0.0.1:18788/last-connect` has a non-loopback `hostname`, then run `aluvia proxy setup` again immediately. That second setup should report `ready: true`.
 
-If still not ready and Chrome is still direct: stop. Do not invent MITM, PAC, nftables, `--proxy-server` relaunch, or `https://aluvia.io/https://…`.
+If still not ready and last-connect is still empty: stop. Do not invent MITM, PAC, nftables, `--proxy-server` relaunch, or `https://aluvia.io/https://…`.
 
-`aluvia proxy status` + `curl -sS http://127.0.0.1:18788/last-connect` — a non-loopback `hostname` with a recent `at` means Chrome is on the proxy even if `attach.status` looks stale.
+`last-connect` with a non-loopback `hostname` means Chrome is on the proxy. Run `setup` once more so `attach.status` becomes `verified`.
 
 ## 5. Unblock (after setup)
 

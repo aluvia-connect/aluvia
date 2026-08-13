@@ -9,10 +9,10 @@ import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
 import {
   attachInstructions,
+  ensureAttachExtension,
   pickAttachMethod,
   tryGsettings,
   waitForExternalConnect,
-  writeAttachExtension,
   writeChromeProxyPolicy,
 } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
@@ -287,15 +287,23 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
 
   const dataPort = state.dataPort;
   const extensionPath = path.join(configDir(), 'ext');
-  writeAttachExtension(extensionPath, dataPort);
+  const ext = ensureAttachExtension(extensionPath, dataPort);
   const policy = writeChromeProxyPolicy(dataPort);
   const gok = await tryGsettings(dataPort);
-  const sinceMs = Date.now();
+  // If we rewrote artifacts this call, only CONNECTs from now on count
+  // (so a prior curl -x cannot fake attach). If artifacts already matched,
+  // count CONNECTs since they were written — so "load extension, browse,
+  // run setup again" verifies without another navigation during the wait.
+  let sinceMs = Date.now();
+  if (!ext.wrote && !policy.wrote) {
+    const times = [ext.mtimeMs, policy.mtimeMs].filter((t): t is number => t != null);
+    if (times.length > 0) sinceMs = Math.min(...times);
+  }
   const timeoutMs = Number(process.env.ALUVIA_ATTACH_WAIT_MS) || 15_000;
   const seen = await waitForExternalConnect({ timeoutMs, sinceMs });
 
   if (seen) {
-    const method = pickAttachMethod({ policyWritten: policy.written, gsettings: gok });
+    const method = pickAttachMethod({ policyPath: policy.path, gsettings: gok });
     const attach: ProxyAttachState = {
       status: 'verified',
       method,

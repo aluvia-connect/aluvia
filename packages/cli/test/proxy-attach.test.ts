@@ -182,6 +182,21 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.strictEqual(result.data.status, 'needs_ui');
   });
 
+  test('second attach accepts a CONNECT recorded after the first write', async () => {
+    await startDaemon();
+    process.env.ALUVIA_ATTACH_WAIT_MS = '50';
+    const first = await captureOutput(() => handleProxy(['attach']));
+    assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
+    assert.strictEqual(first.data.status, 'needs_ui');
+
+    await connectViaProxy(dataPort, 'verify.example').catch(() => undefined);
+
+    process.env.ALUVIA_ATTACH_WAIT_MS = '80';
+    const second = await captureOutput(() => handleProxy(['attach']));
+    assert.strictEqual(second.isError, false, String(second.data.error ?? ''));
+    assert.strictEqual(second.data.status, 'verified');
+  });
+
   test('CONNECT after wait start verifies; loopback does not wipe lastConnect', async () => {
     await startDaemon();
     process.env.ALUVIA_ATTACH_WAIT_MS = '2000';

@@ -6,6 +6,12 @@ import { isLoopbackHostname } from '@aluvia/sdk';
 import { controlRequest } from './proxy-control-client.js';
 import type { AttachMethod } from './proxy-state.js';
 
+export type ArtifactWrite = {
+  wrote: boolean;
+  path: string;
+  mtimeMs: number;
+};
+
 export function writeAttachExtension(extDir: string, dataPort: number): void {
   fs.mkdirSync(extDir, { recursive: true });
   const manifest = {
@@ -30,9 +36,23 @@ export function writeAttachExtension(extDir: string, dataPort: number): void {
   fs.writeFileSync(path.join(extDir, 'background.js'), background);
 }
 
+export function ensureAttachExtension(extDir: string, dataPort: number): ArtifactWrite {
+  const backgroundPath = path.join(extDir, 'background.js');
+  const needle = `port: ${dataPort}`;
+  if (fs.existsSync(backgroundPath)) {
+    const existing = fs.readFileSync(backgroundPath, 'utf8');
+    if (existing.includes(needle)) {
+      return { wrote: false, path: extDir, mtimeMs: fs.statSync(backgroundPath).mtimeMs };
+    }
+  }
+  writeAttachExtension(extDir, dataPort);
+  return { wrote: true, path: extDir, mtimeMs: fs.statSync(backgroundPath).mtimeMs };
+}
+
 export type PolicyWriteResult = {
-  written: boolean;
+  wrote: boolean;
   path: string | null;
+  mtimeMs: number | null;
 };
 
 export function chromeProxyPolicyBody(dataPort: number): Record<string, string> {
@@ -46,15 +66,17 @@ export function chromeProxyPolicyBody(dataPort: number): Record<string, string> 
 function policyDirCandidates(): string[] {
   const override = (process.env.ALUVIA_CHROME_POLICY_DIR ?? '').trim();
   if (override) return [override];
+  // Branded Chrome on Linux only reads /etc/opt/chrome. Home-dir "recommended"
+  // files are writable but ignored — try system dirs first.
   return [
-    path.join(os.homedir(), '.config/google-chrome/policies/recommended'),
-    path.join(os.homedir(), '.config/google-chrome/policies/managed'),
-    path.join(os.homedir(), '.config/chromium/policies/recommended'),
-    path.join(os.homedir(), '.config/chromium/policies/managed'),
     '/etc/opt/chrome/policies/recommended',
     '/etc/opt/chrome/policies/managed',
     '/etc/chromium/policies/recommended',
     '/etc/chromium/policies/managed',
+    path.join(os.homedir(), '.config/google-chrome/policies/recommended'),
+    path.join(os.homedir(), '.config/google-chrome/policies/managed'),
+    path.join(os.homedir(), '.config/chromium/policies/recommended'),
+    path.join(os.homedir(), '.config/chromium/policies/managed'),
   ];
 }
 
@@ -73,16 +95,38 @@ function tryWritePolicyFile(dir: string, dest: string, body: string): boolean {
   return tee.status === 0;
 }
 
+function policyFileMtime(dest: string): number | null {
+  try {
+    return fs.statSync(dest).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 export function writeChromeProxyPolicy(dataPort: number): PolicyWriteResult {
-  const body = JSON.stringify(chromeProxyPolicyBody(dataPort), null, 2) + '\n';
+  const expected = chromeProxyPolicyBody(dataPort);
   const filename = 'aluvia-proxy.json';
   for (const dir of policyDirCandidates()) {
     const dest = path.join(dir, filename);
-    if (tryWritePolicyFile(dir, dest, body)) {
-      return { written: true, path: dest };
+    try {
+      if (fs.existsSync(dest)) {
+        const parsed = JSON.parse(fs.readFileSync(dest, 'utf8')) as { ProxyServer?: string };
+        if (parsed.ProxyServer === expected.ProxyServer) {
+          return { wrote: false, path: dest, mtimeMs: policyFileMtime(dest) };
+        }
+      }
+    } catch {
+      // rewrite below
     }
   }
-  return { written: false, path: null };
+  const body = JSON.stringify(expected, null, 2) + '\n';
+  for (const dir of policyDirCandidates()) {
+    const dest = path.join(dir, filename);
+    if (tryWritePolicyFile(dir, dest, body)) {
+      return { wrote: true, path: dest, mtimeMs: policyFileMtime(dest) ?? Date.now() };
+    }
+  }
+  return { wrote: false, path: null, mtimeMs: null };
 }
 
 export async function tryGsettings(dataPort: number): Promise<boolean> {
@@ -130,8 +174,14 @@ export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs:
   }
 }
 
-export function pickAttachMethod(opts: { policyWritten: boolean; gsettings: boolean }): AttachMethod {
-  if (opts.policyWritten) return 'policy';
+export function pickAttachMethod(opts: { policyPath: string | null; gsettings: boolean }): AttachMethod {
+  const policyPath = opts.policyPath ?? '';
+  if (
+    policyPath.startsWith('/etc/') ||
+    (process.env.ALUVIA_CHROME_POLICY_DIR ?? '').trim().length > 0
+  ) {
+    return 'policy';
+  }
   if (opts.gsettings) return 'gsettings';
   return 'extension';
 }
@@ -139,9 +189,15 @@ export function pickAttachMethod(opts: { policyWritten: boolean; gsettings: bool
 export function attachInstructions(opts: { extensionPath: string; policyPath: string | null }): string {
   const parts: string[] = [];
   if (opts.policyPath) {
-    parts.push(
-      `Chrome policy written to ${opts.policyPath}. Open chrome://policy → Reload policies, then open a non-localhost page.`,
-    );
+    if (opts.policyPath.startsWith('/etc/')) {
+      parts.push(
+        `Chrome policy written to ${opts.policyPath}. Open chrome://policy → Reload policies, then open a non-localhost page.`,
+      );
+    } else {
+      parts.push(
+        `Wrote ${opts.policyPath} (branded Chrome often ignores home-dir policy). Prefer the unpacked extension.`,
+      );
+    }
   }
   parts.push(
     `Or open chrome://extensions → enable Developer mode → Load unpacked → select ${opts.extensionPath}`,

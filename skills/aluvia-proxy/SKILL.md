@@ -14,7 +14,7 @@ Opt-in mobile egress in front of the browser that is already on screen. Same tab
 3. If `$HOME` is not durable, `export ALUVIA_HOME=/workspace/.aluvia`.
 4. `aluvia proxy setup` once (starts the daemon and attaches). One daemon per machine; every agent shares it.
    - `ready: true` → do not touch Chrome proxy settings again.
-   - `needs_ui` → follow `instructions` (reload `chrome://policy` if `policyPath` is set, and/or load the unpacked extension at `extensionPath`). Then open a **new tab** to a site and run `setup` again.
+   - `needs_ui` → follow `instructions` (reload `chrome://policy` only if `policyPath` is under `/etc/`; otherwise load the unpacked extension). Open a **new tab** to a site. When `last-connect` shows a hostname, run `setup` again so status becomes `verified`.
    - If attach stays `unverified` / `needs_ui` and the browser is still not on the proxy, stop. Do not invent MITM, PAC, nftables, or `https://aluvia.io/https://…`. Do not launch a second Chrome.
 
 `aluvia proxy start` + `aluvia proxy attach` is the same work split into two commands.
