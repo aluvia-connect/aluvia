@@ -72,6 +72,12 @@ export type AluviaClientOptions = {
   gatewayPort?: number;
 
   /**
+   * Optional: upstream Aluvia gateway hostname.
+   * Default: 'gateway.aluvia.io'.
+   */
+  gatewayHost?: string;
+
+  /**
    * Optional: local port for the agent's *local* proxy (127.0.0.1:<localPort>).
    *
    * If omitted, the client will pick a free port automatically by binding to port 0.

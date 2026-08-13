@@ -15,7 +15,7 @@ import type { NormalizedRules } from './rules.js';
  */
 export type RawProxyConfig = {
   protocol: GatewayProtocol;
-  host: 'gateway.aluvia.io';
+  host: string;
   port: number;
   username: string;
   password: string;
@@ -93,6 +93,7 @@ export type ConfigManagerOptions = {
   pollIntervalMs: number;
   gatewayProtocol: GatewayProtocol;
   gatewayPort: number;
+  gatewayHost?: string;
   logLevel: LogLevel;
 
   /**
@@ -383,7 +384,7 @@ export class ConfigManager {
     return {
       rawProxy: {
         protocol: this.options.gatewayProtocol,
-        host: 'gateway.aluvia.io',
+        host: this.options.gatewayHost ?? 'gateway.aluvia.io',
         port: this.options.gatewayPort,
         username,
         password,

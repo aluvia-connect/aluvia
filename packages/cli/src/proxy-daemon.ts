@@ -87,6 +87,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     logLevel: 'info',
     ...(opts.connectionId != null ? { connectionId: opts.connectionId } : {}),
     ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
+    ...(opts.gatewayHost ? { gatewayHost: opts.gatewayHost } : {}),
     ...(opts.gatewayPort != null ? { gatewayPort: opts.gatewayPort } : {}),
   });
 

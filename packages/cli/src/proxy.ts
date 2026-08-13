@@ -8,6 +8,7 @@ import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
+import { parseRouteHost } from './proxy-host.js';
 import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
@@ -277,6 +278,56 @@ async function handleStatus(): Promise<void> {
   }
 }
 
+async function requireHealthyDaemon(): Promise<void> {
+  const state = readProxyJson();
+  if (!state || state.pid == null || !isProcessAlive(state.pid)) {
+    output({ error: NOT_RUNNING }, 1);
+  }
+  const healthy = await bothPortsAccept(state);
+  if (!healthy) {
+    output({ error: 'proxyd data port is not healthy. Run `aluvia proxy status`.' }, 1);
+  }
+}
+
+async function handleRouteVerb(verb: 'route' | 'unroute', hostArg: string): Promise<void> {
+  const parsed = parseRouteHost(hostArg);
+  if (!parsed.ok) output({ error: parsed.error }, 1);
+  await requireHealthyDaemon();
+  try {
+    const res = await controlRequest('POST', `/${verb}`, { host: parsed.host });
+    if (res.status !== 200) output({ error: String(res.json.error ?? `${verb} failed`) }, 1);
+    const rules = res.json.rules as string[];
+    output({ rules, count: rules.length });
+  } catch (err) {
+    failControl(err);
+  }
+}
+
+async function handleRotateIp(): Promise<void> {
+  try {
+    const res = await controlRequest('POST', '/rotate-ip', {});
+    if (res.status !== 200) output({ error: String(res.json.error ?? 'rotate-ip failed') }, 1);
+    output({ sessionId: res.json.sessionId, connectionId: res.json.connectionId });
+  } catch (err) {
+    failControl(err);
+  }
+}
+
+async function handleSetGeo(args: string[]): Promise<void> {
+  const clear = args.includes('--clear');
+  const geo = args.find((arg) => arg !== '--clear');
+  if (clear === Boolean(geo)) {
+    output({ error: 'set-geo requires either geo or clear, not both' }, 1);
+  }
+  try {
+    const res = await controlRequest('POST', '/set-geo', clear ? { clear: true } : { geo });
+    if (res.status !== 200) output({ error: String(res.json.error ?? 'set-geo failed') }, 1);
+    output({ targetGeo: res.json.targetGeo, connectionId: res.json.connectionId });
+  } catch (err) {
+    failControl(err);
+  }
+}
+
 export async function handleProxy(args: string[]): Promise<void> {
   const subcommand = args[0];
   if (subcommand === 'start') {
@@ -287,6 +338,18 @@ export async function handleProxy(args: string[]): Promise<void> {
   }
   if (subcommand === 'status') {
     return handleStatus();
+  }
+  if (subcommand === 'route') {
+    return handleRouteVerb('route', args[1] ?? '');
+  }
+  if (subcommand === 'unroute') {
+    return handleRouteVerb('unroute', args[1] ?? '');
+  }
+  if (subcommand === 'rotate-ip') {
+    return handleRotateIp();
+  }
+  if (subcommand === 'set-geo') {
+    return handleSetGeo(args.slice(1));
   }
   output({ error: `Unknown proxy subcommand: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
 }

@@ -98,6 +98,7 @@ export class AluviaClient {
       pollIntervalMs,
       gatewayProtocol,
       gatewayPort,
+      gatewayHost: options.gatewayHost,
       logLevel,
       connectionId,
       strict,
