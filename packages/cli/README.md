@@ -158,6 +158,27 @@ aluvia session set-rules --remove "example.com"
   - `--start <ISO8601>` / `--end <ISO8601>`: Filter by date range.
 - `aluvia geos`: List all available regions for geo-targeting.
 
+## Proxy daemon
+
+Local unauthenticated egress daemon for computer-use VMs. Points the GUI browser at a loopback proxy and routes only the hostnames you choose through Aluvia.
+
+```bash
+aluvia proxy start [--port <n>] [--control-port <n>] [--connection-id <id>]
+aluvia proxy stop
+aluvia proxy status
+aluvia proxy route <host>
+aluvia proxy unroute <host>
+aluvia proxy rotate-ip
+aluvia proxy set-geo <geo>
+aluvia proxy set-geo --clear
+aluvia proxy attach
+```
+
+- Default data port: `18787`. Default control port: `18788`.
+- State lives under `ALUVIA_HOME` (default `~/.aluvia`): auth config, `proxy.json`, logs, and the attach extension.
+- Catch-all `*` is refused. Route only the blocked hostname, then reload the tab.
+- `attach` returns `verified` or `needs_ui` (exit 0). On `needs_ui`, a human loads the unpacked extension at the printed path.
+
 ## Scripting (`--run`)
 
 You can pass a script to `session start` to execute automation logic immediately. The CLI injects `page`, `browser`, and `context` (Playwright objects) into the global scope.

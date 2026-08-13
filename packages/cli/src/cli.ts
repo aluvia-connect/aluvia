@@ -32,6 +32,14 @@ function printHelp(toStderr = false): void {
   log('  aluvia session rotate-ip [options]          Rotate IP on a running session');
   log('  aluvia session set-geo <geo> [options]      Set target geo on a running session');
   log('  aluvia session set-rules <rules> [options]  Set routing rules on a running session\n');
+  log('  aluvia proxy start [options]                 Start the local egress daemon');
+  log('  aluvia proxy stop                            Stop the local egress daemon');
+  log('  aluvia proxy status                          Show daemon status');
+  log('  aluvia proxy route <host>                    Send a hostname through Aluvia');
+  log('  aluvia proxy unroute <host>                  Stop sending a hostname through Aluvia');
+  log('  aluvia proxy rotate-ip                       Rotate the sticky upstream IP');
+  log('  aluvia proxy set-geo <geo>                   Set or clear target geo');
+  log('  aluvia proxy attach                          Point the GUI browser at the local proxy\n');
   log('  aluvia account                              Show account info');
   log('  aluvia account usage [options]              Show usage stats');
   log('  aluvia geos                                 List available geos\n');
@@ -57,17 +65,27 @@ function printHelp(toStderr = false): void {
   log('Session set-geo:');
   log('  <geo>                      Geo code to set (e.g. "US")');
   log('  --clear                    Clear target geo\n');
+  log('Proxy start options:');
+  log('  --port <n>                 Data plane port (default 18787)');
+  log('  --control-port <n>         Control plane port (default 18788)');
+  log('  --connection-id <id>       Use a specific connection ID\n');
   log('Account usage options:');
   log('  --start <ISO8601>          Start date filter');
   log('  --end <ISO8601>            End date filter\n');
   log('Environment:');
-  log('  ALUVIA_API_KEY        Optional. Takes precedence over the key stored by `aluvia auth`.\n');
+  log('  ALUVIA_API_KEY             Optional. Takes precedence over the key stored by `aluvia auth`.');
+  log('  ALUVIA_HOME                Optional. Default ~/.aluvia. Auth + proxyd state live here.');
+  log('  ALUVIA_PROXY_PORT          Optional. Data port (default 18787).');
+  log('  ALUVIA_PROXY_CONTROL_PORT  Optional. Control port (default 18788).\n');
   log('Output:');
   log('  All commands output JSON to stdout.');
 }
 
-function printHelpJson(): never {
-  return output({
+export function buildHelpJson(): {
+  commands: Array<{ command: string; description: string; options: unknown[] }>;
+  environment: string[];
+} {
+  return {
     commands: [
       {
         command: 'session start <url>',
@@ -158,6 +176,53 @@ function printHelpJson(): never {
         ],
       },
       {
+        command: 'proxy start',
+        description: 'Start the local egress daemon',
+        options: [
+          { flag: '--port <n>', description: 'Data plane port (default 18787)' },
+          { flag: '--control-port <n>', description: 'Control plane port (default 18788)' },
+          {
+            flag: '--connection-id <id>',
+            description: 'Use a specific connection ID',
+          },
+        ],
+      },
+      {
+        command: 'proxy stop',
+        description: 'Stop the local egress daemon',
+        options: [],
+      },
+      {
+        command: 'proxy status',
+        description: 'Show daemon status',
+        options: [],
+      },
+      {
+        command: 'proxy route <host>',
+        description: 'Send a hostname through Aluvia',
+        options: [],
+      },
+      {
+        command: 'proxy unroute <host>',
+        description: 'Stop sending a hostname through Aluvia',
+        options: [],
+      },
+      {
+        command: 'proxy rotate-ip',
+        description: 'Rotate the sticky upstream IP',
+        options: [],
+      },
+      {
+        command: 'proxy set-geo <geo>',
+        description: 'Set or clear target geo',
+        options: [{ flag: '--clear', description: 'Clear target geo' }],
+      },
+      {
+        command: 'proxy attach',
+        description: 'Point the GUI browser at the local proxy',
+        options: [],
+      },
+      {
         command: 'account',
         description: 'Show account info',
         options: [],
@@ -196,7 +261,12 @@ function printHelpJson(): never {
         options: [{ flag: '--json', description: 'Output help as JSON' }],
       },
     ],
-  });
+    environment: ['ALUVIA_API_KEY', 'ALUVIA_HOME', 'ALUVIA_PROXY_PORT', 'ALUVIA_PROXY_CONTROL_PORT'],
+  };
+}
+
+function printHelpJson(): never {
+  return output(buildHelpJson());
 }
 
 function printHelpAndExit(args: string[]): never {

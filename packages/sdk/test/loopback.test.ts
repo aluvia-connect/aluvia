@@ -31,7 +31,14 @@ function decide(hostname: string, extra: Record<string, unknown> = {}) {
 
 describe('isLoopbackHostname', () => {
   test('matches the four names in the spec, case-insensitive', () => {
-    for (const host of ['localhost', 'LOCALHOST', '127.0.0.1', '::1', '::ffff:127.0.0.1', '::FFFF:127.0.0.1']) {
+    for (const host of [
+      'localhost',
+      'LOCALHOST',
+      '127.0.0.1',
+      '::1',
+      '::ffff:127.0.0.1',
+      '::FFFF:127.0.0.1',
+    ]) {
       assert.strictEqual(isLoopbackHostname(host), true, host);
     }
   });
