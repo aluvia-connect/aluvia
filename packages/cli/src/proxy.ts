@@ -7,7 +7,14 @@ import { resolveApiKey } from './api-helpers.js';
 import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
-import { tryGsettings, waitForExternalConnect, writeAttachExtension } from './proxy-attach.js';
+import {
+  attachInstructions,
+  pickAttachMethod,
+  tryGsettings,
+  waitForExternalConnect,
+  writeAttachExtension,
+  writeChromeProxyPolicy,
+} from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
 import { parseRouteHost } from './proxy-host.js';
 import {
@@ -250,7 +257,25 @@ async function handleStart(args: string[]): Promise<void> {
   output({ ...started.json, healthy: started.healthy });
 }
 
-async function handleAttach(args: string[]): Promise<void> {
+type AttachOutcome = {
+  status: 'verified' | 'needs_ui';
+  method: ProxyAttachState['method'];
+  proxyUrl: string;
+  extensionPath: string;
+  policyPath: string | null;
+  instructions?: string;
+};
+
+async function persistAttach(attach: ProxyAttachState): Promise<void> {
+  try {
+    const res = await controlRequest('POST', '/attach-state', attach);
+    if (res.status !== 200) output({ error: String(res.json.error ?? 'attach-state failed') }, 1);
+  } catch (err) {
+    failControl(err);
+  }
+}
+
+async function runAttach(args: string[]): Promise<AttachOutcome> {
   if (!isLive(readProxyJson())) {
     await startDaemon(args);
   }
@@ -263,25 +288,28 @@ async function handleAttach(args: string[]): Promise<void> {
   const dataPort = state.dataPort;
   const extensionPath = path.join(configDir(), 'ext');
   writeAttachExtension(extensionPath, dataPort);
+  const policy = writeChromeProxyPolicy(dataPort);
   const gok = await tryGsettings(dataPort);
+  const sinceMs = Date.now();
   const timeoutMs = Number(process.env.ALUVIA_ATTACH_WAIT_MS) || 15_000;
-  const seen = await waitForExternalConnect({ timeoutMs });
+  const seen = await waitForExternalConnect({ timeoutMs, sinceMs });
 
   if (seen) {
-    const method = gok ? 'gsettings' : 'extension';
+    const method = pickAttachMethod({ policyWritten: policy.written, gsettings: gok });
     const attach: ProxyAttachState = {
       status: 'verified',
       method,
       verifiedAt: new Date().toISOString(),
       extensionPath,
     };
-    try {
-      const res = await controlRequest('POST', '/attach-state', attach);
-      if (res.status !== 200) output({ error: String(res.json.error ?? 'attach-state failed') }, 1);
-    } catch (err) {
-      failControl(err);
-    }
-    output({ status: 'verified', method, proxyUrl: state.proxyUrl });
+    await persistAttach(attach);
+    return {
+      status: 'verified',
+      method,
+      proxyUrl: state.proxyUrl,
+      extensionPath,
+      policyPath: policy.path,
+    };
   }
 
   const attach: ProxyAttachState = {
@@ -290,20 +318,55 @@ async function handleAttach(args: string[]): Promise<void> {
     verifiedAt: null,
     extensionPath,
   };
-  try {
-    const res = await controlRequest('POST', '/attach-state', attach);
-    if (res.status !== 200) output({ error: String(res.json.error ?? 'attach-state failed') }, 1);
-  } catch (err) {
-    failControl(err);
+  await persistAttach(attach);
+  return {
+    status: 'needs_ui',
+    method: null,
+    proxyUrl: state.proxyUrl,
+    extensionPath,
+    policyPath: policy.path,
+    instructions: attachInstructions({ extensionPath, policyPath: policy.path }),
+  };
+}
+
+async function handleAttach(args: string[]): Promise<void> {
+  const result = await runAttach(args);
+  if (result.status === 'verified') {
+    output({ status: 'verified', method: result.method, proxyUrl: result.proxyUrl });
   }
   output(
     {
       status: 'needs_ui',
-      extensionPath,
-      instructions: `Open chrome://extensions → enable Developer mode → Load unpacked → select ${extensionPath}`,
+      extensionPath: result.extensionPath,
+      ...(result.policyPath ? { policyPath: result.policyPath } : {}),
+      instructions: result.instructions,
     },
     0,
   );
+}
+
+async function handleSetup(args: string[]): Promise<void> {
+  const result = await runAttach(args);
+  const state = readProxyJson();
+  let statusJson: Record<string, unknown> = {};
+  let healthy = false;
+  try {
+    const { json } = await controlRequest('GET', '/status');
+    statusJson = json;
+    healthy = state ? await bothPortsAccept(state) : false;
+  } catch (err) {
+    failControl(err);
+  }
+  output({
+    ...statusJson,
+    healthy,
+    ready: result.status === 'verified' && healthy,
+    status: result.status,
+    method: result.method,
+    extensionPath: result.extensionPath,
+    ...(result.policyPath ? { policyPath: result.policyPath } : {}),
+    ...(result.instructions ? { instructions: result.instructions } : {}),
+  });
 }
 
 async function handleStop(): Promise<void> {
@@ -427,6 +490,9 @@ export async function handleProxy(args: string[]): Promise<void> {
   }
   if (subcommand === 'attach') {
     return handleAttach(args.slice(1));
+  }
+  if (subcommand === 'setup') {
+    return handleSetup(args.slice(1));
   }
   output({ error: `Unknown proxy subcommand: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
 }

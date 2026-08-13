@@ -101,7 +101,7 @@ describe('control server', () => {
       rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
       setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
       stop: () => {},
-      getLastConnect: () => 'verify.example',
+      getLastConnect: () => ({ hostname: 'verify.example', at: 1 }),
       setAttach: (next) => {
         stored = next;
       },
@@ -110,7 +110,7 @@ describe('control server', () => {
 
     const last = await fetch(`http://127.0.0.1:${port}/last-connect`);
     assert.strictEqual(last.status, 200);
-    assert.deepStrictEqual(await last.json(), { hostname: 'verify.example' });
+    assert.deepStrictEqual(await last.json(), { hostname: 'verify.example', at: 1 });
 
     const bad = await fetch(`http://127.0.0.1:${port}/attach-state`, {
       method: 'POST',
@@ -125,7 +125,7 @@ describe('control server', () => {
   });
 
   test('POST /last-connect clears lastConnect and returns hostname null', async () => {
-    let lastConnect: string | null = 'verify.example';
+    let lastConnect = { hostname: 'verify.example' as string | null, at: 1 as number | null };
     server = createControlServer({
       getStatus: () => {
         throw new Error('unused');
@@ -136,8 +136,8 @@ describe('control server', () => {
       setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
       stop: () => {},
       getLastConnect: () => lastConnect,
-      setLastConnect: (hostname) => {
-        lastConnect = hostname;
+      setLastConnect: (snapshot) => {
+        lastConnect = snapshot;
       },
     });
     const port = await listen(server);
@@ -148,11 +148,11 @@ describe('control server', () => {
       body: JSON.stringify({}),
     });
     assert.strictEqual(cleared.status, 200);
-    assert.deepStrictEqual(await cleared.json(), { hostname: null });
-    assert.strictEqual(lastConnect, null);
+    assert.deepStrictEqual(await cleared.json(), { hostname: null, at: null });
+    assert.deepStrictEqual(lastConnect, { hostname: null, at: null });
 
     const last = await fetch(`http://127.0.0.1:${port}/last-connect`);
     assert.strictEqual(last.status, 200);
-    assert.deepStrictEqual(await last.json(), { hostname: null });
+    assert.deepStrictEqual(await last.json(), { hostname: null, at: null });
   });
 });

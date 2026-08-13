@@ -39,7 +39,8 @@ function printHelp(toStderr = false): void {
   log('  aluvia proxy unroute <host>                  Stop sending a hostname through Aluvia');
   log('  aluvia proxy rotate-ip                       Rotate the sticky upstream IP');
   log('  aluvia proxy set-geo <geo>                   Set or clear target geo');
-  log('  aluvia proxy attach                          Point the GUI browser at the local proxy\n');
+  log('  aluvia proxy attach                          Point the GUI browser at the local proxy');
+  log('  aluvia proxy setup                           Start proxyd and attach in one step\n');
   log('  aluvia account                              Show account info');
   log('  aluvia account usage [options]              Show usage stats');
   log('  aluvia geos                                 List available geos\n');
@@ -221,6 +222,18 @@ export function buildHelpJson(): {
         command: 'proxy attach',
         description: 'Point the GUI browser at the local proxy',
         options: [],
+      },
+      {
+        command: 'proxy setup',
+        description: 'Start the daemon and attach the GUI browser',
+        options: [
+          { flag: '--port <n>', description: 'Data plane port (default 18787)' },
+          { flag: '--control-port <n>', description: 'Control plane port (default 18788)' },
+          {
+            flag: '--connection-id <id>',
+            description: 'Use a specific connection ID',
+          },
+        ],
       },
       {
         command: 'account',

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parseRouteHost } from './proxy-host.js';
-import type { ProxyAttachState } from './proxy-state.js';
+import type { LastConnectSnapshot, ProxyAttachState } from './proxy-state.js';
 
 export class ControlError extends Error {
   statusCode: number;
@@ -35,9 +35,8 @@ export type ControlHandlers = {
     connectionId: number;
   }>;
   stop: () => void;
-  /** Filled in Task 4. Optional here so Task 2 can omit the routes. */
-  getLastConnect?: () => string | null;
-  setLastConnect?: (hostname: string | null) => void;
+  getLastConnect?: () => LastConnectSnapshot;
+  setLastConnect?: (snapshot: LastConnectSnapshot) => void;
   setAttach?: (attach: ProxyAttachState) => void;
 };
 
@@ -156,14 +155,15 @@ async function handleRequest(
     }
 
     if (method === 'GET' && pathname === '/last-connect') {
-      sendJson(res, 200, { hostname: handlers.getLastConnect?.() ?? null });
+      sendJson(res, 200, handlers.getLastConnect?.() ?? { hostname: null, at: null });
       return;
     }
 
     if (method === 'POST' && pathname === '/last-connect') {
       await readJsonBody(req);
-      handlers.setLastConnect?.(null);
-      sendJson(res, 200, { hostname: null });
+      const cleared: LastConnectSnapshot = { hostname: null, at: null };
+      handlers.setLastConnect?.(cleared);
+      sendJson(res, 200, cleared);
       return;
     }
 
@@ -176,7 +176,10 @@ async function handleRequest(
       }
       const attach: ProxyAttachState = {
         status,
-        method: body.method === 'gsettings' || body.method === 'extension' ? body.method : null,
+        method:
+          body.method === 'gsettings' || body.method === 'extension' || body.method === 'policy'
+            ? body.method
+            : null,
         verifiedAt: typeof body.verifiedAt === 'string' ? body.verifiedAt : null,
         extensionPath: typeof body.extensionPath === 'string' ? body.extensionPath : null,
       };

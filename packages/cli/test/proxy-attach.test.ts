@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'ALUVIA_GATEWAY_HOST',
   'ALUVIA_GATEWAY_PORT',
   'ALUVIA_ATTACH_WAIT_MS',
+  'ALUVIA_CHROME_POLICY_DIR',
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -69,6 +70,7 @@ describe('proxy attach', { concurrency: 1 }, () => {
     delete process.env.ALUVIA_PROXY_PORT;
     delete process.env.ALUVIA_PROXY_CONTROL_PORT;
     delete process.env.ALUVIA_ATTACH_WAIT_MS;
+    process.env.ALUVIA_CHROME_POLICY_DIR = path.join(home, 'chrome-policy');
   });
 
   afterEach(async () => {
@@ -134,7 +136,11 @@ describe('proxy attach', { concurrency: 1 }, () => {
     const result = await pending;
     assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
     assert.strictEqual(result.data.status, 'verified');
-    assert.ok(result.data.method === 'extension' || result.data.method === 'gsettings');
+    assert.ok(
+      result.data.method === 'extension' ||
+        result.data.method === 'gsettings' ||
+        result.data.method === 'policy',
+    );
     assert.strictEqual(result.data.proxyUrl, `http://127.0.0.1:${dataPort}`);
 
     const attach = readProxyJson()?.attach;
@@ -189,7 +195,9 @@ describe('proxy attach', { concurrency: 1 }, () => {
 
     const last = await fetch(`http://127.0.0.1:${controlPort}/last-connect`);
     assert.strictEqual(last.status, 200);
-    assert.deepStrictEqual(await last.json(), { hostname: 'verify.example' });
+    const body = (await last.json()) as { hostname: string; at: number };
+    assert.strictEqual(body.hostname, 'verify.example');
+    assert.ok(typeof body.at === 'number');
   });
 
   test('observer ignores loopback and keeps last public host', async () => {
@@ -198,7 +206,42 @@ describe('proxy attach', { concurrency: 1 }, () => {
     await connectViaProxy(dataPort, '127.0.0.1').catch(() => undefined);
     const last = await fetch(`http://127.0.0.1:${controlPort}/last-connect`);
     assert.strictEqual(last.status, 200);
-    assert.deepStrictEqual(await last.json(), { hostname: 'verify.example' });
+    const body = (await last.json()) as { hostname: string; at: number };
+    assert.strictEqual(body.hostname, 'verify.example');
+    assert.ok(typeof body.at === 'number');
+  });
+
+  test('attach writes a chrome policy file when ALUVIA_CHROME_POLICY_DIR is set', async () => {
+    const policyDir = path.join(home, 'chrome-policy');
+    process.env.ALUVIA_CHROME_POLICY_DIR = policyDir;
+    process.env.ALUVIA_ATTACH_WAIT_MS = '50';
+    await startDaemon();
+    const result = await captureOutput(() => handleProxy(['attach']));
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    const policyPath = path.join(policyDir, 'aluvia-proxy.json');
+    assert.strictEqual(fs.existsSync(policyPath), true);
+    const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8')) as {
+      ProxyMode: string;
+      ProxyServer: string;
+      ProxyBypassList: string;
+    };
+    assert.strictEqual(policy.ProxyMode, 'fixed_servers');
+    assert.strictEqual(policy.ProxyServer, `127.0.0.1:${dataPort}`);
+    assert.ok(policy.ProxyBypassList.includes('localhost'));
+    assert.ok(typeof result.data.policyPath === 'string');
+  });
+
+  test('setup reports ready after a CONNECT', async () => {
+    await startDaemon();
+    process.env.ALUVIA_ATTACH_WAIT_MS = '2000';
+    const pending = captureOutput(() => handleProxy(['setup']));
+    await delay(50);
+    await connectViaProxy(dataPort, 'verify.example').catch(() => undefined);
+    const result = await pending;
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.ready, true);
+    assert.strictEqual(result.data.status, 'verified');
+    assert.strictEqual(result.data.healthy, true);
   });
 
   test('Restart preserves attach unless data port changed', async () => {

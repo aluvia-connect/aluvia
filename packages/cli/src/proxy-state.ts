@@ -6,7 +6,12 @@ export const DEFAULT_DATA_PORT = 18787;
 export const DEFAULT_CONTROL_PORT = 18788;
 
 export type AttachStatus = 'unverified' | 'verified' | 'needs_ui';
-export type AttachMethod = 'gsettings' | 'extension' | null;
+export type AttachMethod = 'gsettings' | 'extension' | 'policy' | null;
+
+export type LastConnectSnapshot = {
+  hostname: string | null;
+  at: number | null;
+};
 
 export type ProxyAttachState = {
   status: AttachStatus;

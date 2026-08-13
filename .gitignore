@@ -5,3 +5,6 @@ dist/
 .idea/
 .vscode/
 .worktrees/
+.transfer/
+.DS_Store
+**/.DS_Store

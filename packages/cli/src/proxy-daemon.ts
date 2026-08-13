@@ -8,6 +8,7 @@ import {
   defaultAttach,
   readProxyJson,
   writeProxyJson,
+  type LastConnectSnapshot,
   type ProxyAttachState,
   type ProxyJson,
 } from './proxy-state.js';
@@ -92,10 +93,10 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     ...(opts.gatewayPort != null ? { gatewayPort: opts.gatewayPort } : {}),
   });
 
-  let lastConnect: string | null = null;
+  let lastConnect: LastConnectSnapshot = { hostname: null, at: null };
   client.setRequestObserver((hostname) => {
     if (isLoopbackHostname(hostname)) return;
-    lastConnect = hostname;
+    lastConnect = { hostname, at: Date.now() };
   });
 
   const persist = (ready: boolean): void => {
@@ -240,8 +241,8 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       void shutdown();
     },
     getLastConnect: () => lastConnect,
-    setLastConnect: (hostname) => {
-      lastConnect = hostname;
+    setLastConnect: (snapshot) => {
+      lastConnect = snapshot;
     },
     setAttach: (next) => {
       attach = next;

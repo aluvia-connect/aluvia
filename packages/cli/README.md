@@ -172,12 +172,14 @@ aluvia proxy rotate-ip
 aluvia proxy set-geo <geo>
 aluvia proxy set-geo --clear
 aluvia proxy attach
+aluvia proxy setup
 ```
 
 - Default data port: `18787`. Default control port: `18788`.
-- State lives under `ALUVIA_HOME` (default `~/.aluvia`): auth config, `proxy.json`, logs, and the attach extension.
-- Catch-all `*` is refused. Route only the blocked hostname, then reload the tab.
-- `attach` returns `verified` or `needs_ui` (exit 0). On `needs_ui`, a human loads the unpacked extension at the printed path.
+- State lives under `ALUVIA_HOME` (default `~/.aluvia`): auth config, `proxy.json`, logs, attach extension, and optional Chrome policy file.
+- Catch-all `*` is refused. Route only the blocked hostname. After `route` / `unroute`, open a **new tab** (Chrome reuses CONNECT tunnels; F5 is not enough).
+- `setup` starts the daemon and attaches. `ready: true` means the GUI browser has CONNECTed to the local proxy.
+- `attach` / `setup` return `verified` or `needs_ui` (exit 0). On `needs_ui`, follow `instructions` (policy reload and/or load the unpacked extension).
 
 ## Scripting (`--run`)
 

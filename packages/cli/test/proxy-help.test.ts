@@ -15,6 +15,7 @@ describe('proxy help', () => {
       'proxy rotate-ip',
       'proxy set-geo <geo>',
       'proxy attach',
+      'proxy setup',
     ]) {
       assert.ok(names.includes(verb), verb);
     }
