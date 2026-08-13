@@ -20,10 +20,8 @@
     "packages/mcp"
   ],
   "scripts": {
-    "publish:dry-run": "npm publish --dry-run -w @aluvia/sdk && npm publish --dry-run -w aluvia && npm publish --dry-run -w @aluvia/mcp",
+    "publish:dry-run": "npm publish --dry-run -w aluvia --access public",
     "publish:cli": "npm publish -w aluvia --access public",
-    "publish:mcp": "npm publish -w @aluvia/mcp",
-    "publish:sdk": "npm publish -w @aluvia/sdk --access public",
     "build:all": "npm run build:sdk && npm run build:cli && npm run build:mcp",
     "build:sdk": "npm run build -w @aluvia/sdk",
     "build:cli": "npm run build -w aluvia",

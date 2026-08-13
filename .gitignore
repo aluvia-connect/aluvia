@@ -1,5 +1,7 @@
 node_modules/
 dist/
+packages/cli/vendor/
+packages/cli/package.json.prepack
 
 .env
 .idea/
