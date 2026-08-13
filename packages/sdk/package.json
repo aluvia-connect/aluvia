@@ -1,6 +1,6 @@
 {
   "name": "@aluvia/sdk",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Aluvia SDK for Node.js - local smart proxy for automation workloads and AI agents",
   "license": "MIT",
   "author": "Aluvia",

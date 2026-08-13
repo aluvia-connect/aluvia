@@ -22,8 +22,8 @@ const ENV_KEYS = [
   'ALUVIA_GATEWAY_PORT',
 ] as const;
 
-const NOT_RUNNING = 'proxyd is not running. Run `aluvia proxy start`.';
-const DATA_PORT_UNHEALTHY = 'proxyd data port is not healthy. Run `aluvia proxy status`.';
+const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
+const DATA_PORT_UNHEALTHY = 'proxyd data port is not healthy. Run `aluvia status`.';
 
 function snapshotEnv(): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {};

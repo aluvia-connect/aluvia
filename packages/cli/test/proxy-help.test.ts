@@ -7,19 +7,20 @@ describe('proxy help', () => {
     const help = buildHelpJson();
     const names = help.commands.map((c) => c.command);
     for (const verb of [
-      'proxy start',
-      'proxy stop',
-      'proxy status',
-      'proxy route <host>',
-      'proxy unroute <host>',
-      'proxy rotate-ip',
-      'proxy set-geo <geo>',
-      'proxy attach',
-      'proxy setup',
-      'proxy upstream <url>',
+      'setup',
+      'start',
+      'stop',
+      'status',
+      'route <host>',
+      'unroute <host>',
+      'attach',
+      'rotate-ip',
+      'set-geo <geo>',
+      'upstream <url>',
     ]) {
       assert.ok(names.includes(verb), verb);
     }
+    assert.ok(!names.some((name) => name.startsWith('proxy ')));
     assert.ok(help.environment.includes('ALUVIA_HOME'));
     assert.ok(help.environment.includes('ALUVIA_UPSTREAM'));
   });

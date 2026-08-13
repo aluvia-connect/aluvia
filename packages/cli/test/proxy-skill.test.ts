@@ -28,21 +28,24 @@ describe('proxy skill install', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  test('bundled skill exists and is the aluvia-proxy skill', () => {
+  test('bundled skill exists and is the aluvia skill', () => {
     const src = bundledSkillPath();
     assert.ok(src);
     const body = fs.readFileSync(src, 'utf8');
-    assert.ok(body.includes('name: aluvia-proxy'));
-    assert.ok(body.includes('aluvia proxy route'));
+    assert.match(body, /^name: aluvia$/m);
+    assert.ok(!body.includes('aluvia-proxy'));
+    assert.ok(body.includes('aluvia route'));
+    assert.ok(body.includes('npm i -g aluvia'));
     assert.ok(body.includes('policyCommand'));
     assert.ok(body.includes('ready: true'));
     assert.ok(body.includes('Restart required'));
+    assert.ok(!body.includes('git clone'));
     assert.ok(!body.includes('aluvia-grok-bot-install'));
     assert.ok(!body.includes('export ALUVIA_HOME'));
     assert.ok(!body.includes('Load unpacked'));
     assert.ok(!body.includes('net-internals'));
     assert.ok(!body.includes('last-connect'));
-    const repoCopy = path.join(process.cwd(), '..', '..', 'skills', 'aluvia-proxy', 'SKILL.md');
+    const repoCopy = path.join(process.cwd(), '..', '..', 'skills', 'aluvia', 'SKILL.md');
     if (fs.existsSync(repoCopy)) {
       assert.strictEqual(body, fs.readFileSync(repoCopy, 'utf8'));
     }
@@ -53,9 +56,10 @@ describe('proxy skill install', () => {
     process.env.ALUVIA_SKILL_DIRS = destRoot;
     const result = installProxySkill();
     assert.strictEqual(result.error, undefined);
-    assert.deepStrictEqual(result.skillPaths, [path.join(destRoot, 'aluvia-proxy', 'SKILL.md')]);
+    assert.deepStrictEqual(result.skillPaths, [path.join(destRoot, 'aluvia', 'SKILL.md')]);
     const written = fs.readFileSync(result.skillPaths[0], 'utf8');
     assert.strictEqual(written, fs.readFileSync(bundledSkillPath()!, 'utf8'));
+    assert.strictEqual(result.skill, written);
   });
 
   test('default dirs include ALUVIA_HOME/skills and ~/.agents/skills', () => {

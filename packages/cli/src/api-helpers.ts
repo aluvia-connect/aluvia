@@ -42,7 +42,7 @@ export function requireApi(): AluviaApi {
     return output(
       {
         error:
-          'This command needs the Aluvia network. Run `aluvia proxy upstream --clear`, then `aluvia auth`.',
+          'This command needs the Aluvia network. Run `aluvia upstream --clear`, then `aluvia auth`.',
       },
       1,
     );

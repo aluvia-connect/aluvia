@@ -20,20 +20,20 @@
     "packages/mcp"
   ],
   "scripts": {
-    "publish:dry-run": "npm publish --dry-run -w @aluvia/sdk && npm publish --dry-run -w @aluvia/cli && npm publish --dry-run -w @aluvia/mcp",
-    "publish:cli": "npm publish -w @aluvia/cli",
+    "publish:dry-run": "npm publish --dry-run -w @aluvia/sdk && npm publish --dry-run -w aluvia && npm publish --dry-run -w @aluvia/mcp",
+    "publish:cli": "npm publish -w aluvia --access public",
     "publish:mcp": "npm publish -w @aluvia/mcp",
-    "publish:sdk": "npm publish -w @aluvia/sdk",
+    "publish:sdk": "npm publish -w @aluvia/sdk --access public",
     "build:all": "npm run build:sdk && npm run build:cli && npm run build:mcp",
     "build:sdk": "npm run build -w @aluvia/sdk",
-    "build:cli": "npm run build -w @aluvia/cli",
+    "build:cli": "npm run build -w aluvia",
     "build:mcp": "npm run build -w @aluvia/mcp",
-    "test:all": "npm test -w @aluvia/sdk && npm test -w @aluvia/cli && npm test -w @aluvia/mcp",
+    "test:all": "npm test -w @aluvia/sdk && npm test -w aluvia && npm test -w @aluvia/mcp",
     "test:sdk": "npm test -w @aluvia/sdk",
-    "test:cli": "npm test -w @aluvia/cli",
+    "test:cli": "npm test -w aluvia",
     "test:mcp": "npm test -w @aluvia/mcp",
-    "lint": "npm run lint -w @aluvia/sdk && npm run lint -w @aluvia/cli",
-    "lint:fix": "npm run lint:fix -w @aluvia/sdk && npm run lint:fix -w @aluvia/cli"
+    "lint": "npm run lint -w @aluvia/sdk && npm run lint -w aluvia",
+    "lint:fix": "npm run lint:fix -w @aluvia/sdk && npm run lint:fix -w aluvia"
   },
   "engines": {
     "node": ">=18"

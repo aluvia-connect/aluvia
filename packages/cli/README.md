@@ -1,14 +1,14 @@
-# @aluvia/cli
+# aluvia
 
 The official command-line interface for [Aluvia](https://aluvia.io) — launch and manage browser sessions with automatic unblocking, smart routing, and resident proxy daemons.
 
 ## Installation
 
 ```bash
-npm install -g @aluvia/cli@1.2.0
+npm install -g aluvia
 ```
 
-Computer-use / Grok Bot: `aluvia auth` then `aluvia proxy setup`. That starts the daemon, attaches Chrome via `/etc` policy, and installs the `aluvia-proxy` skill into `~/.agents/skills`.
+Computer-use / Grok Bot: `npx aluvia setup` (or `npm i -g aluvia` then `aluvia setup`). That starts the daemon, attaches Chrome via `/etc` policy, and installs the `aluvia` skill into `~/.agents/skills`.
 
 ## Authentication
 
@@ -165,22 +165,23 @@ aluvia session set-rules --remove "example.com"
 Local unauthenticated egress daemon for computer-use VMs. Points the GUI browser at a loopback proxy and routes only the hostnames you choose through Aluvia.
 
 ```bash
-aluvia proxy start [--port <n>] [--control-port <n>] [--connection-id <id>]
-aluvia proxy stop
-aluvia proxy status
-aluvia proxy route <host>
-aluvia proxy unroute <host>
-aluvia proxy rotate-ip
-aluvia proxy set-geo <geo>
-aluvia proxy set-geo --clear
-aluvia proxy attach
-aluvia proxy setup
+aluvia setup
+aluvia start [--port <n>] [--control-port <n>] [--connection-id <id>]
+aluvia stop
+aluvia status
+aluvia route <host>
+aluvia unroute <host>
+aluvia rotate-ip
+aluvia set-geo <geo>
+aluvia set-geo --clear
+aluvia attach
+aluvia upstream <url>
 ```
 
 - Default data port: `18787`. Default control port: `18788`.
 - State lives under `ALUVIA_HOME` (default `/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`): auth config, `proxy.json`, logs, and Chrome policy path.
 - Catch-all `*` is refused. Route only the blocked hostname. `route` / `unroute` drop that host's live CONNECT tunnels; reload the tab.
-- `setup` starts the daemon, installs the `aluvia-proxy` skill into `~/.agents/skills`, and attaches. `ready: true` means the GUI browser has CONNECTed to the local proxy.
+- `setup` starts the daemon, installs the `aluvia` skill into `~/.agents/skills`, and attaches. `ready: true` means the GUI browser has CONNECTed to the local proxy.
 - `attach` / `setup` return `verified` or `needs_ui` (exit 0). On `needs_ui`, if `policyCommand` is set, run it in a shell, then reload `chrome://policy` and run `setup` again.
 
 ## Scripting (`--run`)

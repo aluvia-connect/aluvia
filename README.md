@@ -12,7 +12,7 @@
 This repository is organized as a monorepo with three packages:
 
 - **[@aluvia/sdk](./packages/sdk)** — Core SDK with `AluviaClient`, `AluviaApi`, framework adapters, and block detection
-- **[@aluvia/cli](./packages/cli)** — Command-line tools for browser automation and session management
+- **[aluvia](./packages/cli)** — Command-line tools for browser automation and session management
 - **[@aluvia/mcp](./packages/mcp)** — Model Context Protocol server for AI agent integration
 
 ## Features
@@ -25,7 +25,7 @@ This repository is organized as a monorepo with three packages:
 - **IP rotation and geo targeting** — rotate IPs or target specific US regions at runtime
 - **REST API wrapper** — manage connections, check usage, and build custom tooling with `AluviaApi`
 
-Computer-use VMs can run a local unauthenticated proxy (`aluvia proxy`) in front of the GUI browser that is already on the machine. Route only the hostnames that block you; signed-in tabs stay on the datacenter IP. Agent skill: [skills/aluvia-proxy/SKILL.md](./skills/aluvia-proxy/SKILL.md). `aluvia proxy setup` installs that skill into `~/.agents/skills`.
+Computer-use VMs can run a local unauthenticated proxy (`aluvia proxy`) in front of the GUI browser that is already on the machine. Route only the hostnames that block you; signed-in tabs stay on the datacenter IP. Agent skill: [skills/aluvia/SKILL.md](./skills/aluvia/SKILL.md). `aluvia setup` installs that skill into `~/.agents/skills`.
 
 ---
 
@@ -59,7 +59,7 @@ export ALUVIA_API_KEY="your-api-key"
 
 For CLI use:
 ```bash
-npm install -g @aluvia/cli
+npm install -g aluvia
 export ALUVIA_API_KEY="your-api-key"
 ```
 

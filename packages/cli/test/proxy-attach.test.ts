@@ -311,6 +311,10 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.strictEqual(result.data.status, 'verified');
     assert.strictEqual(result.data.healthy, true);
     assert.ok(Array.isArray(result.data.skillPaths));
+    assert.ok(typeof result.data.next === 'string');
+    assert.match(String(result.data.next), /Read and follow the Aluvia skill/);
+    assert.ok(typeof result.data.skillPath === 'string');
+    assert.ok(String(result.data.skill).includes('aluvia route'));
     assert.strictEqual(result.data.extensionPath, undefined);
     assert.strictEqual(result.data.policyCommand, undefined);
     assert.strictEqual(result.data.instructions, undefined);
@@ -327,6 +331,8 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
     assert.strictEqual(result.data.ready, false);
     assert.strictEqual(result.data.status, 'needs_ui');
+    assert.match(String(result.data.next), /Read and follow the Aluvia skill/);
+    assert.ok(String(result.data.skill).includes('policyCommand'));
     assert.ok(typeof result.data.policyCommand === 'string');
     assert.ok((result.data.policyCommand as string).includes('127.0.0.1:' + dataPort));
     assert.strictEqual(result.data.extensionPath, undefined);

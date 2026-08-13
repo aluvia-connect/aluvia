@@ -257,7 +257,7 @@ try {
 
 ## CLI and MCP
 
-- **CLI** — `npm install -g @aluvia/cli` for `aluvia session start`, `aluvia session close`, etc.
+- **CLI** — `npm install -g aluvia` for `aluvia session start`, `aluvia session close`, etc.
 - **MCP** — `npm install @aluvia/mcp` for Model Context Protocol integration with Claude, Cursor, etc.
 
 ---

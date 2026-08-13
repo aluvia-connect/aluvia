@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.0] - 2026-08-13
+
+### Added
+- Optional `installId` on `AluviaApi` / `AluviaClient` (sent as `X-Aluvia-Install-Id` when no API key is set).
+- `PaymentRequiredError` for HTTP 402 (`code: payment_required`, `claimUrl`).
+- Optional `upstream` on `AluviaClient` for bring-your-own proxy (skips the Aluvia API).
+
+### Changed
+- `apiKey` is no longer required when `installId` or `upstream` is set.
+
 ## [2.0.1] - 2026-03-16
 
 ### Changed

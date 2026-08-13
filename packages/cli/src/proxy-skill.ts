@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDir } from './config.js';
 
-const SKILL_REL = path.join('aluvia-proxy', 'SKILL.md');
+const SKILL_REL = path.join('aluvia', 'SKILL.md');
 
 // @ts-ignore - import.meta.url exists at runtime in ESM (the bin/main build)
 const thisModuleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -45,15 +45,16 @@ export function skillInstallDirs(): string[] {
   return [...new Set(dirs)];
 }
 
-export function installProxySkill(): { skillPaths: string[]; error?: string } {
+export function installProxySkill(): { skillPaths: string[]; skill?: string; error?: string } {
   const src = bundledSkillPath();
   if (!src) {
-    return { skillPaths: [], error: 'bundled aluvia-proxy skill is missing from this CLI install' };
+    return { skillPaths: [], error: 'bundled aluvia skill is missing from this CLI install' };
   }
   const body = fs.readFileSync(src);
+  const skill = body.toString('utf8');
   const skillPaths: string[] = [];
   for (const dir of skillInstallDirs()) {
-    const destDir = path.join(dir, 'aluvia-proxy');
+    const destDir = path.join(dir, 'aluvia');
     const dest = path.join(destDir, 'SKILL.md');
     try {
       fs.mkdirSync(destDir, { recursive: true });
@@ -63,5 +64,5 @@ export function installProxySkill(): { skillPaths: string[]; error?: string } {
       // skip unwritable agent dirs
     }
   }
-  return { skillPaths };
+  return { skillPaths, skill };
 }

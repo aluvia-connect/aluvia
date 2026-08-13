@@ -1,5 +1,5 @@
 {
-  "name": "@aluvia/cli",
+  "name": "aluvia",
   "version": "1.2.0",
   "description": "Aluvia CLI — local proxy daemon, GUI attach, and agent skill for computer-use VMs",
   "license": "MIT",
@@ -57,6 +57,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aluvia/sdk": "^2.0.1"
+    "@aluvia/sdk": "^2.1.0"
   }
 }

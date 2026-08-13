@@ -233,7 +233,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
 
     const status = await captureOutput(() => handleProxy(['status']));
     assert.strictEqual(status.isError, true);
-    assert.strictEqual(status.data.error, 'proxyd is not running. Run `aluvia proxy start`.');
+    assert.strictEqual(status.data.error, 'proxyd is not running. Run `aluvia start`.');
   });
 
   test('stop when already dead', async () => {
@@ -292,7 +292,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
       const elapsed = Date.now() - started;
       assert.ok(elapsed <= 3000, `status took ${elapsed}ms`);
       assert.strictEqual(result.isError, true);
-      assert.strictEqual(result.data.error, 'proxyd did not respond. Run `aluvia proxy status`.');
+      assert.strictEqual(result.data.error, 'proxyd did not respond. Run `aluvia status`.');
     } finally {
       const state = readProxyJson();
       if (state) writeProxyJson({ ...state, pid: null, ready: false });

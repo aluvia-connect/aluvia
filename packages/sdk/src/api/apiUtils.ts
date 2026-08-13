@@ -57,7 +57,7 @@ export function paymentRequiredFromBody(body: unknown): PaymentRequiredError {
   }
   return new PaymentRequiredError(
     maybeError?.error.message ??
-      'Trial data is used up. Run `aluvia auth` to sign in and buy data, or `aluvia proxy upstream <url>` to use your own proxy.',
+      'Trial data is used up. Run `aluvia auth` to sign in and buy data, or `aluvia upstream <url>` to use your own proxy.',
     claimUrl,
   );
 }

@@ -25,26 +25,26 @@ function printHelp(toStderr = false): void {
   const log = toStderr ? console.error : console.log;
   log('Aluvia CLI\n');
   log(
-    'A first proxy or session command starts a free trial (no API key). When the trial is used up, run `aluvia auth` or `aluvia proxy upstream <url>`.\n',
+    'A first setup or session command starts a free trial (no API key). When the trial is used up, run `aluvia auth` or `aluvia upstream <url>`.\n',
   );
   log('Usage:');
-  log('  aluvia session start <url> [options]       Start a browser session');
+  log('  aluvia setup [options]                      Start proxyd and attach the GUI browser');
+  log('  aluvia start [options]                      Start the local egress daemon');
+  log('  aluvia stop                                 Stop the local egress daemon');
+  log('  aluvia status                               Show daemon status');
+  log('  aluvia route <host>                         Send a hostname through Aluvia');
+  log('  aluvia unroute <host>                       Stop sending a hostname through Aluvia');
+  log('  aluvia attach                               Point the GUI browser at the local proxy');
+  log('  aluvia rotate-ip                            Rotate the sticky upstream IP');
+  log('  aluvia set-geo <geo>                        Set or clear target geo');
+  log('  aluvia upstream <url>                       Use your own proxy (no Aluvia account)\n');
+  log('  aluvia session start <url> [options]       Start a headless browser session');
   log('  aluvia session close [options]              Stop a browser session');
   log('  aluvia session list                         List active browser sessions');
   log('  aluvia session get [options]                Get session details and proxy URLs');
   log('  aluvia session rotate-ip [options]          Rotate IP on a running session');
   log('  aluvia session set-geo <geo> [options]      Set target geo on a running session');
   log('  aluvia session set-rules <rules> [options]  Set routing rules on a running session\n');
-  log('  aluvia proxy start [options]                 Start the local egress daemon');
-  log('  aluvia proxy stop                            Stop the local egress daemon');
-  log('  aluvia proxy status                          Show daemon status');
-  log('  aluvia proxy route <host>                    Send a hostname through Aluvia');
-  log('  aluvia proxy unroute <host>                  Stop sending a hostname through Aluvia');
-  log('  aluvia proxy rotate-ip                       Rotate the sticky upstream IP');
-  log('  aluvia proxy set-geo <geo>                   Set or clear target geo');
-  log('  aluvia proxy attach                          Point the GUI browser at the local proxy');
-  log('  aluvia proxy setup                           Start proxyd and attach in one step');
-  log('  aluvia proxy upstream <url>                  Use your own proxy (no Aluvia account)\n');
   log('  aluvia account                              Show account info');
   log('  aluvia account usage [options]              Show usage stats');
   log('  aluvia geos                                 List available geos\n');
@@ -70,10 +70,13 @@ function printHelp(toStderr = false): void {
   log('Session set-geo:');
   log('  <geo>                      Geo code to set (e.g. "US")');
   log('  --clear                    Clear target geo\n');
-  log('Proxy start options:');
+  log('Daemon start / setup options:');
   log('  --port <n>                 Data plane port (default 18787)');
   log('  --control-port <n>         Control plane port (default 18788)');
   log('  --connection-id <id>       Use a specific connection ID\n');
+  log('Daemon set-geo:');
+  log('  <geo>                      Geo code to set (e.g. "US")');
+  log('  --clear                    Clear target geo\n');
   log('Account usage options:');
   log('  --start <ISO8601>          Start date filter');
   log('  --end <ISO8601>            End date filter\n');
@@ -184,7 +187,19 @@ export function buildHelpJson(): {
         ],
       },
       {
-        command: 'proxy start',
+        command: 'setup',
+        description: 'Start the daemon and attach the GUI browser',
+        options: [
+          { flag: '--port <n>', description: 'Data plane port (default 18787)' },
+          { flag: '--control-port <n>', description: 'Control plane port (default 18788)' },
+          {
+            flag: '--connection-id <id>',
+            description: 'Use a specific connection ID',
+          },
+        ],
+      },
+      {
+        command: 'start',
         description: 'Start the local egress daemon',
         options: [
           { flag: '--port <n>', description: 'Data plane port (default 18787)' },
@@ -196,56 +211,44 @@ export function buildHelpJson(): {
         ],
       },
       {
-        command: 'proxy stop',
+        command: 'stop',
         description: 'Stop the local egress daemon',
         options: [],
       },
       {
-        command: 'proxy status',
+        command: 'status',
         description: 'Show daemon status',
         options: [],
       },
       {
-        command: 'proxy route <host>',
+        command: 'route <host>',
         description: 'Send a hostname through Aluvia',
         options: [],
       },
       {
-        command: 'proxy unroute <host>',
+        command: 'unroute <host>',
         description: 'Stop sending a hostname through Aluvia',
         options: [],
       },
       {
-        command: 'proxy rotate-ip',
-        description: 'Rotate the sticky upstream IP',
-        options: [],
-      },
-      {
-        command: 'proxy set-geo <geo>',
-        description: 'Set or clear target geo',
-        options: [{ flag: '--clear', description: 'Clear target geo' }],
-      },
-      {
-        command: 'proxy attach',
+        command: 'attach',
         description: 'Point the GUI browser at the local proxy',
         options: [],
       },
       {
-        command: 'proxy upstream <url>',
-        description: 'Use your own proxy instead of Aluvia (or --clear)',
-        options: [{ flag: '--clear', description: 'Remove the saved upstream' }],
+        command: 'rotate-ip',
+        description: 'Rotate the sticky upstream IP',
+        options: [],
       },
       {
-        command: 'proxy setup',
-        description: 'Start the daemon and attach the GUI browser',
-        options: [
-          { flag: '--port <n>', description: 'Data plane port (default 18787)' },
-          { flag: '--control-port <n>', description: 'Control plane port (default 18788)' },
-          {
-            flag: '--connection-id <id>',
-            description: 'Use a specific connection ID',
-          },
-        ],
+        command: 'set-geo <geo>',
+        description: 'Set or clear target geo',
+        options: [{ flag: '--clear', description: 'Clear target geo' }],
+      },
+      {
+        command: 'upstream <url>',
+        description: 'Use your own proxy instead of Aluvia (or --clear)',
+        options: [{ flag: '--clear', description: 'Remove the saved upstream' }],
       },
       {
         command: 'account',
@@ -308,6 +311,19 @@ function printHelpAndExit(args: string[]): never {
   process.exit(0);
 }
 
+const PROXY_TOP_LEVEL = new Set([
+  'setup',
+  'start',
+  'stop',
+  'status',
+  'route',
+  'unroute',
+  'attach',
+  'upstream',
+  'rotate-ip',
+  'set-geo',
+]);
+
 function parseDaemonArgs(args: string[]): ParsedSessionArgs {
   return parseSessionArgs(args);
 }
@@ -366,9 +382,9 @@ async function main(): Promise<void> {
   } else if (command === 'geos') {
     if (wantsHelp) printHelpAndExit(args);
     await handleGeos();
-  } else if (command === 'proxy') {
+  } else if (PROXY_TOP_LEVEL.has(command)) {
     if (wantsHelp) printHelpAndExit(args);
-    await handleProxy(args.slice(1));
+    await handleProxy(args);
   } else if (command === 'help' || command === '--help' || command === '-h' || command === '') {
     printHelpAndExit(args);
   } else {

@@ -3,7 +3,7 @@
 Thank you for your interest in contributing! This monorepo contains three packages:
 
 - **@aluvia/sdk** — Core SDK (TypeScript/Node.js)
-- **@aluvia/cli** — Command-line tools
+- **aluvia** — Command-line tools
 - **@aluvia/mcp** — MCP server
 
 See **CLAUDE.md** for architecture, workspace layout, and key patterns.

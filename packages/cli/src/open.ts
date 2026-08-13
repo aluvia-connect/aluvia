@@ -81,7 +81,7 @@ export function handleOpen({
     output(
       {
         error:
-          'session start needs the Aluvia network. Run `aluvia proxy upstream --clear`, then retry or `aluvia auth`.',
+          'session start needs the Aluvia network. Run `aluvia upstream --clear`, then retry or `aluvia auth`.',
       },
       1,
     );

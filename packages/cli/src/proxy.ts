@@ -28,9 +28,9 @@ import {
   type ProxyJson,
 } from './proxy-state.js';
 
-const NOT_RUNNING = 'proxyd is not running. Run `aluvia proxy start`.';
-const CONTROL_TIMEOUT = 'proxyd did not respond. Run `aluvia proxy status`.';
-const BYO_NETWORK = 'This command needs the Aluvia network. Run `aluvia proxy upstream --clear`, then `aluvia auth`.';
+const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
+const CONTROL_TIMEOUT = 'proxyd did not respond. Run `aluvia status`.';
+const BYO_NETWORK = 'This command needs the Aluvia network. Run `aluvia upstream --clear`, then `aluvia auth`.';
 
 function parsePositiveInt(raw: string | undefined): number | undefined {
   if (raw == null || raw.trim() === '') return undefined;
@@ -404,7 +404,14 @@ async function handleSetup(args: string[]): Promise<void> {
     failControl(err);
   }
   const ready = result.status === 'verified' && healthy;
+  const skillPath = skill.skillPaths[0] ?? null;
+  const next = skillPath
+    ? `Read and follow the Aluvia skill now (${skillPath}). The full text is in this JSON as "skill". Use it for attach, route, unroute, and payment_required. Do not skip it.`
+    : 'Skill file was not written. On a block run `aluvia route <host>` then reload. If code is payment_required, tell a human to run `aluvia auth` or `aluvia upstream <url>`.';
   output({
+    next,
+    skillPath,
+    ...(skill.skill ? { skill: skill.skill } : {}),
     ...statusJson,
     healthy,
     ready,
@@ -467,7 +474,7 @@ async function requireHealthyDaemon(): Promise<void> {
   }
   const healthy = await bothPortsAccept(state);
   if (!healthy) {
-    output({ error: 'proxyd data port is not healthy. Run `aluvia proxy status`.' }, 1);
+    output({ error: 'proxyd data port is not healthy. Run `aluvia status`.' }, 1);
   }
 }
 
@@ -505,7 +512,7 @@ async function handleUpstream(args: string[]): Promise<void> {
   }
   const raw = args.find((arg) => !arg.startsWith('-'));
   if (!raw) {
-    output({ error: 'Usage: aluvia proxy upstream <url> | aluvia proxy upstream --clear' }, 1);
+    output({ error: 'Usage: aluvia upstream <url> | aluvia upstream --clear' }, 1);
   }
   try {
     const parsed = saveUpstream(raw);
@@ -565,5 +572,5 @@ export async function handleProxy(args: string[]): Promise<void> {
   if (subcommand === 'upstream') {
     return handleUpstream(args.slice(1));
   }
-  output({ error: `Unknown proxy subcommand: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
+  output({ error: `Unknown command: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
 }
