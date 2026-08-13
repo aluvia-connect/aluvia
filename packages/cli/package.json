@@ -1,7 +1,7 @@
 {
   "name": "@aluvia/cli",
-  "version": "1.1.1",
-  "description": "Aluvia CLI - command line tools for browser automation and session management",
+  "version": "1.2.0",
+  "description": "Aluvia CLI — local proxy daemon, GUI attach, and agent skill for computer-use VMs",
   "license": "MIT",
   "author": "Aluvia",
   "repository": {
@@ -28,6 +28,7 @@
   },
   "files": [
     "dist/**/*",
+    "skills/**/*",
     "README.md",
     "LICENSE"
   ],
@@ -56,6 +57,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aluvia/sdk": "^2.0.0"
+    "@aluvia/sdk": "^2.0.1"
   }
 }

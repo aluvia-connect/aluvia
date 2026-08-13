@@ -17,6 +17,7 @@ import {
 } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
 import { parseRouteHost } from './proxy-host.js';
+import { installProxySkill } from './proxy-skill.js';
 import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
@@ -358,6 +359,7 @@ async function handleAttach(args: string[]): Promise<void> {
 }
 
 async function handleSetup(args: string[]): Promise<void> {
+  const skill = installProxySkill();
   const result = await runAttach(args);
   const state = readProxyJson();
   let statusJson: Record<string, unknown> = {};
@@ -376,6 +378,8 @@ async function handleSetup(args: string[]): Promise<void> {
     status: result.status,
     method: result.method,
     extensionPath: result.extensionPath,
+    skillPaths: skill.skillPaths,
+    ...(skill.error ? { skillError: skill.error } : {}),
     ...(result.policyPath ? { policyPath: result.policyPath } : {}),
     ...(result.instructions ? { instructions: result.instructions } : {}),
   });

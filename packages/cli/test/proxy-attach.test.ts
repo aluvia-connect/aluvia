@@ -260,6 +260,7 @@ describe('proxy attach', { concurrency: 1 }, () => {
     assert.strictEqual(result.data.ready, true);
     assert.strictEqual(result.data.status, 'verified');
     assert.strictEqual(result.data.healthy, true);
+    assert.ok(Array.isArray(result.data.skillPaths));
   });
 
   test('Restart preserves attach unless data port changed', async () => {
