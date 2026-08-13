@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// @ts-ignore - import.meta.url exists at runtime in ESM (the only build the bin/main uses)
 const thisModuleDir = path.dirname(fileURLToPath(import.meta.url));
 
 export function getCliLaunch(): { execPath: string; prefixArgs: string[]; script: string } {
