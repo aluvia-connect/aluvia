@@ -60,7 +60,8 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
         success: false,
         error: {
           code: 'payment_required',
-          message: 'Trial data is used up. Run `aluvia auth` to sign in and buy data, or `aluvia upstream <url>` to use your own proxy.',
+          message:
+            'Trial data is used up. Ask the human for an API key (`aluvia auth --key`) or a proxy URL (`aluvia upstream <url>`).',
           claim_url: 'https://dashboard.aluvia.io/cli-auth',
         },
       });

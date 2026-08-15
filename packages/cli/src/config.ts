@@ -9,8 +9,10 @@ import path from 'node:path';
  * `$ALUVIA_HOME/config.json` (default `/workspace/.aluvia` when `/workspace`
  * exists, else `~/.aluvia`) with restrictive permissions.
  *
- * Resolution order lives in api-helpers.ts: BYO upstream, ALUVIA_API_KEY,
- * stored apiKey, then installId.
+ * Agents persist credentials with `aluvia auth --key` and `aluvia upstream`.
+ * Resolution order lives in api-helpers.ts: stored/env BYO upstream, then
+ * ALUVIA_API_KEY / stored apiKey, then installId. Env vars are optional
+ * overrides, not the human/agent path.
  */
 
 export interface AluviaConfig {
@@ -187,13 +189,13 @@ export function parseUpstreamUrl(raw: string): ParsedUpstream {
   try {
     url = new URL(raw.trim());
   } catch {
-    throw new Error("Invalid upstream URL. Use http(s)://user:pass@host:port");
+    throw new Error('Invalid upstream URL. Use http(s)://user:pass@host:port');
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error("Invalid upstream URL. Use http(s)://user:pass@host:port");
+    throw new Error('Invalid upstream URL. Use http(s)://user:pass@host:port');
   }
   if (!url.hostname) {
-    throw new Error("Invalid upstream URL. Host is required.");
+    throw new Error('Invalid upstream URL. Host is required.');
   }
   const protocol = url.protocol === 'https:' ? 'https' : 'http';
   const port = url.port ? Number(url.port) : protocol === 'https' ? 443 : 80;

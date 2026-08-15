@@ -6,11 +6,14 @@ import path from 'node:path';
 import { PaymentRequiredError } from '@aluvia/sdk';
 import { captureOutput } from '../src/mcp-helpers.js';
 import { handleAuth } from '../src/auth.js';
+import { paymentRequiredOutput, resolveCredential } from '../src/api-helpers.js';
 import {
-  paymentRequiredOutput,
-  resolveCredential,
-} from '../src/api-helpers.js';
-import { ensureInstallId, saveApiKey, saveUpstream } from '../src/config.js';
+  ensureInstallId,
+  getStoredApiKey,
+  getStoredUpstream,
+  saveApiKey,
+  saveUpstream,
+} from '../src/config.js';
 
 const ENV_KEYS = ['ALUVIA_HOME', 'ALUVIA_API_KEY', 'ALUVIA_UPSTREAM'] as const;
 
@@ -63,6 +66,38 @@ describe('credential resolver', { concurrency: 1 }, () => {
       claim_url: 'https://dashboard.aluvia.io/cli-auth',
     });
     assert.strictEqual(paymentRequiredOutput(new Error('nope')), null);
+  });
+
+  test('auth --key saves the key and does not echo it', async () => {
+    tempHome();
+    const secret = 'aluvia_secret_test_key';
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL) => {
+      if (String(url).includes('/account')) {
+        return new Response(JSON.stringify({ success: true, data: { id: 'acct-1' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch ${String(url)}`);
+    }) as typeof fetch;
+    try {
+      const result = await captureOutput(() => handleAuth(['--key', secret]));
+      assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+      assert.strictEqual(result.data.status, 'authenticated');
+      assert.strictEqual(getStoredApiKey(), secret);
+      assert.strictEqual(getStoredUpstream(), undefined);
+      assert.ok(!JSON.stringify(result.data).includes(secret));
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  test('auth --key without a value errors', async () => {
+    tempHome();
+    const result = await captureOutput(() => handleAuth(['--key']));
+    assert.strictEqual(result.isError, true);
+    assert.match(String(result.data.error), /Usage: aluvia auth --key/);
   });
 
   test('auth init sends stored install_id', async () => {

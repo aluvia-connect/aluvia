@@ -11,16 +11,29 @@ describe('proxy help', () => {
       'start',
       'stop',
       'status',
-      'route <host>',
-      'unroute <host>',
-      'attach',
+      'proxy-on',
+      'proxy-off',
       'rotate-ip',
-      'set-geo <geo>',
       'upstream <url>',
+      'auth --key <key>',
     ]) {
       assert.ok(names.includes(verb), verb);
     }
+    assert.ok(!names.includes('set-geo <geo>'));
     assert.ok(!names.some((name) => name.startsWith('proxy ')));
+    const geoFlag = { flag: '--geo <geo>' };
+    const proxyOn = help.commands.find((c) => c.command === 'proxy-on');
+    const rotate = help.commands.find((c) => c.command === 'rotate-ip');
+    assert.ok(proxyOn?.options.some((o) => (o as { flag?: string }).flag === geoFlag.flag));
+    assert.ok(rotate?.options.some((o) => (o as { flag?: string }).flag === geoFlag.flag));
+    const setup = help.commands.find((c) => c.command === 'setup');
+    const start = help.commands.find((c) => c.command === 'start');
+    assert.deepStrictEqual(
+      setup?.options.map((o) => (o as { flag?: string }).flag),
+      ['--url <url>'],
+    );
+    assert.deepStrictEqual(start?.options, []);
+    assert.ok(!help.environment.includes('ALUVIA_PROXY_PORT'));
     assert.ok(help.environment.includes('ALUVIA_HOME'));
     assert.ok(help.environment.includes('ALUVIA_UPSTREAM'));
   });

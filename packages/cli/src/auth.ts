@@ -1,5 +1,12 @@
 import { AluviaApi } from '@aluvia/sdk';
-import { getStoredApiKey, getStoredInstallId, getStoredUpstream, saveApiKey, clearApiKey } from './config.js';
+import {
+  getStoredApiKey,
+  getStoredInstallId,
+  getStoredUpstream,
+  saveApiKey,
+  clearApiKey,
+  clearUpstream,
+} from './config.js';
 import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
 
 const API_URL = 'https://api.aluvia.io';
@@ -17,16 +24,43 @@ function authOutput(data: Record<string, unknown>, exitCode = 0): never {
   return undefined as never;
 }
 
+function parseAuthKey(args: string[]): string | null | undefined {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--key') {
+      const value = args[i + 1];
+      if (value == null || value.startsWith('-')) return null;
+      return value;
+    }
+  }
+  return undefined;
+}
+
+async function recycleAfterCredentialChange(): Promise<boolean> {
+  const { recycleDaemonIfRunning } = await import('./proxy.js');
+  const result = await recycleDaemonIfRunning();
+  return result.recycled;
+}
+
+function credentialNext(recycled: boolean): string {
+  return recycled
+    ? 'Reload the tab. Do not restart Chrome.'
+    : 'Saved. If Chrome is not aimed yet, run `aluvia setup --url <page>`.';
+}
+
 async function finishWithKey(apiKey: string): Promise<never> {
   try {
     const api = new AluviaApi({ apiKey });
     await api.account.get();
     saveApiKey(apiKey);
+    clearUpstream();
+    const recycled = await recycleAfterCredentialChange();
     return authOutput({
       status: 'authenticated',
-      message: 'API key saved successfully. Run `aluvia account` to view account details.',
+      recycled,
+      next: credentialNext(recycled),
     });
   } catch (err) {
+    if (err instanceof MCPOutputCapture) throw err;
     return authOutput(
       { error: `Received an API key but it failed verification: ${(err as Error).message}` },
       1,
@@ -133,15 +167,25 @@ function runStatus(): never {
   return authOutput({ authenticated: false, provider: 'none' });
 }
 
-function runLogout(): never {
+async function runLogout(): Promise<never> {
   const removed = clearApiKey();
+  const recycled = removed ? await recycleAfterCredentialChange() : false;
   return authOutput({
     status: removed ? 'logged_out' : 'not_logged_in',
     configFile: STORED_KEY_LOCATION,
+    recycled,
   });
 }
 
 export async function handleAuth(args: string[]): Promise<void> {
+  if (args.includes('--key')) {
+    const key = parseAuthKey(args);
+    if (!key) {
+      return authOutput({ error: 'Usage: aluvia auth --key <key>' }, 1);
+    }
+    return finishWithKey(key);
+  }
+
   const subcommand = args.find((argument) => !argument.startsWith('-'));
 
   if (subcommand === 'status') {

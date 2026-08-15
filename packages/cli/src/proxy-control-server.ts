@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { parseRouteHost } from './proxy-host.js';
-import type { LastConnectSnapshot, ProxyAttachState } from './proxy-state.js';
+import type { LastConnectSnapshot, ProxyAttachState, ProxyEgress } from './proxy-state.js';
 
 export class ControlError extends Error {
   statusCode: number;
@@ -23,6 +23,7 @@ export type ControlStatusBody = {
   rules: string[];
   count: number;
   attach: ProxyAttachState;
+  egress?: ProxyEgress;
 };
 
 export type ControlHandlers = {
@@ -34,6 +35,8 @@ export type ControlHandlers = {
     targetGeo: string | null;
     connectionId: number;
   }>;
+  proxyOn?: () => Promise<{ egress: ProxyEgress; rules: string[] }>;
+  proxyOff?: () => Promise<{ egress: ProxyEgress; rules: string[] }>;
   stop: () => void;
   getLastConnect?: () => LastConnectSnapshot;
   setLastConnect?: (snapshot: LastConnectSnapshot) => void;
@@ -129,6 +132,28 @@ async function handleRequest(
       return;
     }
 
+    if (method === 'POST' && pathname === '/proxy-on') {
+      await readJsonBody(req);
+      if (!handlers.proxyOn) {
+        sendJson(res, 404, { error: 'not found' });
+        return;
+      }
+      const result = await handlers.proxyOn();
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/proxy-off') {
+      await readJsonBody(req);
+      if (!handlers.proxyOff) {
+        sendJson(res, 404, { error: 'not found' });
+        return;
+      }
+      const result = await handlers.proxyOff();
+      sendJson(res, 200, result);
+      return;
+    }
+
     if (method === 'POST' && pathname === '/set-geo') {
       const body = await readJsonBody(req);
       const hasGeo = Object.prototype.hasOwnProperty.call(body, 'geo');
@@ -177,7 +202,10 @@ async function handleRequest(
       const attach: ProxyAttachState = {
         status,
         method:
-          body.method === 'gsettings' || body.method === 'extension' || body.method === 'policy'
+          body.method === 'gsettings' ||
+          body.method === 'extension' ||
+          body.method === 'policy' ||
+          body.method === 'flags'
             ? body.method
             : null,
         verifiedAt: typeof body.verifiedAt === 'string' ? body.verifiedAt : null,

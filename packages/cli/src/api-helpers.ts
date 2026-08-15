@@ -1,4 +1,12 @@
-import { AluviaApi, PaymentRequiredError, readLock, listSessions, isProcessAlive, removeLock, toLockData } from '@aluvia/sdk';
+import {
+  AluviaApi,
+  PaymentRequiredError,
+  readLock,
+  listSessions,
+  isProcessAlive,
+  removeLock,
+  toLockData,
+} from '@aluvia/sdk';
 import type { LockData } from '@aluvia/sdk';
 import { output } from './cli.js';
 import {
@@ -41,8 +49,7 @@ export function requireApi(): AluviaApi {
   if (cred.kind === 'byo') {
     return output(
       {
-        error:
-          'This command needs the Aluvia network. Run `aluvia upstream --clear`, then `aluvia auth`.',
+        error: 'This command needs the Aluvia network. Run `aluvia upstream --clear`, then `aluvia auth`.',
       },
       1,
     );

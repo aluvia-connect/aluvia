@@ -82,8 +82,7 @@ describe('configDir ALUVIA_HOME', () => {
     const os = await import('node:os');
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-home-'));
     process.env.ALUVIA_HOME = home;
-    const { ensureInstallId, getStoredInstallId, saveApiKey, clearApiKey } =
-      await import('../src/config.js');
+    const { ensureInstallId, getStoredInstallId, saveApiKey, clearApiKey } = await import('../src/config.js');
     const first = ensureInstallId();
     assert.match(first, /^[a-f0-9]{64}$/);
     assert.strictEqual(ensureInstallId(), first);

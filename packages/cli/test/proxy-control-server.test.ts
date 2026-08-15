@@ -67,6 +67,45 @@ describe('control server', () => {
     assert.strictEqual(routed, 'example.com');
   });
 
+  test('POST /proxy-on and /proxy-off call handlers', async () => {
+    let egress: 'aluvia' | 'direct' = 'direct';
+    server = createControlServer({
+      getStatus: () => {
+        throw new Error('unused');
+      },
+      route: async () => ({ rules: [] }),
+      unroute: async () => ({ rules: [] }),
+      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
+      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
+      proxyOn: async () => {
+        egress = 'aluvia';
+        return { egress, rules: ['*'] };
+      },
+      proxyOff: async () => {
+        egress = 'direct';
+        return { egress, rules: [] };
+      },
+      stop: () => {},
+    });
+    const port = await listen(server);
+
+    const on = await fetch(`http://127.0.0.1:${port}/proxy-on`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(on.status, 200);
+    assert.deepStrictEqual(await on.json(), { egress: 'aluvia', rules: ['*'] });
+
+    const off = await fetch(`http://127.0.0.1:${port}/proxy-off`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(off.status, 200);
+    assert.deepStrictEqual(await off.json(), { egress: 'direct', rules: [] });
+  });
+
   test('unknown path is 404 and set-geo with neither field is 400', async () => {
     server = createControlServer({
       getStatus: () => {

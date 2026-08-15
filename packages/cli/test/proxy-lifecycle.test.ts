@@ -106,6 +106,25 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.deepStrictEqual(api.requests, []);
   });
 
+  test('upstream recycles a running daemon so the new URL applies', async () => {
+    const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(started.isError, false, String(started.data.error ?? ''));
+    const before = readProxyJson();
+    assert.ok(before?.pid);
+
+    const result = await captureOutput(() => handleProxy(['upstream', 'http://user:pass@127.0.0.1:9']));
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.provider, 'custom');
+    assert.strictEqual(result.data.upstreamHost, '127.0.0.1');
+    assert.strictEqual(result.data.recycled, true);
+    assert.match(String(result.data.next), /Reload the tab/);
+
+    const after = readProxyJson();
+    assert.ok(after?.ready);
+    assert.ok(after.pid);
+    assert.notStrictEqual(after.pid, before.pid);
+  });
+
   test('start maps 402 to payment_required', async () => {
     delete process.env.ALUVIA_API_KEY;
     api.setPaymentRequired(true);
@@ -210,6 +229,11 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(status.data.healthy, true);
     assert.ok(typeof status.data.proxyUrl === 'string');
     assert.ok(typeof status.data.controlUrl === 'string');
+    assert.ok(typeof status.data.next === 'string');
+    assert.ok(status.data.next.length > 0);
+    const what = status.data.what as { aimed?: string; egress?: string } | undefined;
+    assert.ok(typeof what?.aimed === 'string');
+    assert.ok(typeof what?.egress === 'string');
   });
 
   test('stop then status', async () => {
@@ -222,7 +246,8 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
 
     const stopped = await captureOutput(() => handleProxy(['stop']));
     assert.strictEqual(stopped.isError, false);
-    assert.deepStrictEqual(stopped.data, { status: 'stopped' });
+    assert.strictEqual(stopped.data.status, 'stopped');
+    assert.ok(typeof stopped.data.warning === 'string');
 
     const after = readProxyJson();
     assert.ok(after);
@@ -253,13 +278,14 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(after.ready, false);
   });
 
-  test('start strips *', async () => {
+  test('start keeps catch-all * from the connection', async () => {
     await api.close();
     api = await createMockAluviaApi({ rules: ['*', 'example.com'] });
     process.env.ALUVIA_API_BASE_URL = api.url;
     const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
     assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
-    assert.deepStrictEqual(api.state.rules, ['example.com']);
+    assert.deepStrictEqual(api.state.rules, ['*', 'example.com']);
+    assert.strictEqual(result.data.egress, 'aluvia');
   });
 
   test('control timeout', async () => {

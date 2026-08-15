@@ -556,6 +556,10 @@ export class AluviaClient {
     return this.proxyServer.closeConnectionsForHost(hostname);
   }
 
+  closeAllConnections(): number {
+    return this.proxyServer.closeAllConnections();
+  }
+
   /**
    * Update the filtering rules used by the proxy.
    * @param rules

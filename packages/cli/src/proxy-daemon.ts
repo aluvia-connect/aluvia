@@ -6,6 +6,7 @@ import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
   defaultAttach,
+  egressFromRules,
   readProxyJson,
   writeProxyJson,
   type LastConnectSnapshot,
@@ -123,6 +124,15 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
   client.setRequestObserver((hostname) => {
     if (isLoopbackHostname(hostname)) return;
     lastConnect = { hostname, at: Date.now() };
+    if (attach.status !== 'verified') {
+      attach = {
+        status: 'verified',
+        method: attach.method ?? 'flags',
+        verifiedAt: new Date().toISOString(),
+        extensionPath: null,
+      };
+      persist(true);
+    }
   });
 
   const persist = (ready: boolean): void => {
@@ -157,39 +167,37 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     attach,
   });
 
+  const failState = (error: string, code?: string | null, claimUrl?: string | null): ProxyJson => ({
+    pid: process.pid,
+    ready: false,
+    dataPort: opts.dataPort,
+    controlPort: opts.controlPort,
+    proxyUrl,
+    controlUrl,
+    connectionId: opts.connectionId ?? existing?.connectionId ?? null,
+    sessionId: existing?.sessionId ?? null,
+    targetGeo: existing?.targetGeo ?? null,
+    rules: existing?.rules ?? [],
+    attach,
+    error,
+    code: code ?? null,
+    claimUrl: claimUrl ?? null,
+  });
+
   try {
     await client.start();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof PaymentRequiredError) {
-      writeProxyJson({
-        pid: process.pid,
-        ready: false,
-        dataPort: opts.dataPort,
-        controlPort: opts.controlPort,
-        proxyUrl,
-        controlUrl,
-        connectionId: opts.connectionId ?? existing?.connectionId ?? null,
-        sessionId: existing?.sessionId ?? null,
-        targetGeo: existing?.targetGeo ?? null,
-        rules: existing?.rules ?? [],
-        attach,
-        error: err.message,
-        code: 'payment_required',
-        claimUrl: err.claimUrl,
-      });
+      writeProxyJson(failState(err.message, 'payment_required', err.claimUrl));
       throw err;
     }
     if (message.includes('EADDRINUSE')) {
+      writeProxyJson(failState(`port ${opts.dataPort} in use`));
       throw new Error(`port ${opts.dataPort} in use`);
     }
+    writeProxyJson(failState(message));
     throw err;
-  }
-
-  const currentRules = client.getNetworkState().rules;
-  const stripped = currentRules.filter((rule) => rule.trim() !== '*');
-  if (stripped.length !== currentRules.length) {
-    await client.updateRules(stripped);
   }
 
   if (!opts.upstream && client.getNetworkState().sessionId == null) {
@@ -240,7 +248,20 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
         rules: netState.rules,
         count: netState.rules.length,
         attach,
+        egress: egressFromRules(netState.rules),
       };
+    },
+    proxyOn: async () => {
+      await client.updateRules(['*']);
+      client.closeAllConnections();
+      persist(true);
+      return { egress: 'aluvia' as const, rules: client.getNetworkState().rules };
+    },
+    proxyOff: async () => {
+      await client.updateRules([]);
+      client.closeAllConnections();
+      persist(true);
+      return { egress: 'direct' as const, rules: client.getNetworkState().rules };
     },
     route: async (host) => {
       const rules = client.getNetworkState().rules;

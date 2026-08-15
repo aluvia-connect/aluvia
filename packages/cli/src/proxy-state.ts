@@ -6,7 +6,13 @@ export const DEFAULT_DATA_PORT = 18787;
 export const DEFAULT_CONTROL_PORT = 18788;
 
 export type AttachStatus = 'unverified' | 'verified' | 'needs_ui';
-export type AttachMethod = 'gsettings' | 'extension' | 'policy' | null;
+export type AttachMethod = 'gsettings' | 'extension' | 'policy' | 'flags' | null;
+
+export type ProxyEgress = 'aluvia' | 'direct';
+
+export function egressFromRules(rules: string[] | undefined): ProxyEgress {
+  return (rules ?? []).some((rule) => rule.trim() === '*') ? 'aluvia' : 'direct';
+}
 
 export type LastConnectSnapshot = {
   hostname: string | null;

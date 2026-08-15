@@ -42,7 +42,7 @@ function startArgs(dataPort: number, controlPort: number): string[] {
   return ['start', '--port', String(dataPort), '--control-port', String(controlPort)];
 }
 
-describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () => {
+describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
   let home: string;
   let api: Awaited<ReturnType<typeof createMockAluviaApi>>;
   let gateway: Awaited<ReturnType<typeof createMockGateway>>;
@@ -91,15 +91,16 @@ describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () =
     }
   });
 
-  test('synchronous route takes effect before the CLI returns', async () => {
-    const routed = await captureOutput(() => handleProxy(['route', 'example.com']));
+  test('proxy-on sends every host through the gateway', async () => {
+    const routed = await captureOutput(() => handleProxy(['proxy-on']));
     assert.strictEqual(routed.isError, false, String(routed.data.error ?? ''));
-    assert.deepStrictEqual(routed.data, { rules: ['example.com'], count: 1 });
+    assert.strictEqual(routed.data.egress, 'aluvia');
+    assert.deepStrictEqual(routed.data.rules, ['*']);
     await connectViaProxy(dataPort, 'example.com');
     assert.ok(gateway.connects.includes('example.com:443'));
   });
 
-  test('route closes a live CONNECT so the next one can flip to Aluvia', async () => {
+  test('proxy-on closes a live CONNECT so the next one can flip to Aluvia', async () => {
     const held = await new Promise<{ socket: import('net').Socket }>((resolve, reject) => {
       const req = http.request({
         host: '127.0.0.1',
@@ -115,7 +116,7 @@ describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () =
     const closed = new Promise<void>((resolve) => {
       held.socket.once('close', () => resolve());
     });
-    const routed = await captureOutput(() => handleProxy(['route', 'held.example']));
+    const routed = await captureOutput(() => handleProxy(['proxy-on']));
     assert.strictEqual(routed.isError, false, String(routed.data.error ?? ''));
     await Promise.race([
       closed,
@@ -123,34 +124,28 @@ describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () =
     ]);
   });
 
-  test('unroute goes direct and does not hit the mock gateway', async () => {
-    const routed = await captureOutput(() => handleProxy(['route', 'example.com']));
+  test('proxy-off goes direct and does not hit the mock gateway', async () => {
+    const routed = await captureOutput(() => handleProxy(['proxy-on']));
     assert.strictEqual(routed.isError, false, String(routed.data.error ?? ''));
     await connectViaProxy(dataPort, 'example.com');
     const before = gateway.connects.length;
 
-    const unrouted = await captureOutput(() => handleProxy(['unroute', 'example.com']));
-    assert.strictEqual(unrouted.isError, false, String(unrouted.data.error ?? ''));
-    assert.deepStrictEqual(unrouted.data, { rules: [], count: 0 });
+    const off = await captureOutput(() => handleProxy(['proxy-off']));
+    assert.strictEqual(off.isError, false, String(off.data.error ?? ''));
+    assert.strictEqual(off.data.egress, 'direct');
+    assert.deepStrictEqual(off.data.rules, []);
 
     await connectViaProxy(dataPort, 'example.com');
     assert.strictEqual(gateway.connects.length, before);
+    assert.strictEqual(readProxyJson()?.pid != null, true);
   });
 
-  test('unrouted host never hits the gateway', async () => {
+  test('direct host never hits the gateway', async () => {
     await connectViaProxy(dataPort, 'other.com');
     assert.deepStrictEqual(gateway.connects, []);
   });
 
-  test('CLI refuses catch-all *', async () => {
-    const beforeRules = [...api.state.rules];
-    const result = await captureOutput(() => handleProxy(['route', '*']));
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.data.error, 'catch-all * is not allowed');
-    assert.deepStrictEqual(api.state.rules, beforeRules);
-  });
-
-  test('control refuses catch-all *', async () => {
+  test('control refuses catch-all * on leftover /route', async () => {
     const res = await fetch(`http://127.0.0.1:${controlPort}/route`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -159,25 +154,6 @@ describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () =
     assert.strictEqual(res.status, 400);
     const body = (await res.json()) as { error?: string };
     assert.strictEqual(body.error, 'catch-all * is not allowed');
-  });
-
-  test('URL parse lowercases hostname', async () => {
-    const result = await captureOutput(() => handleProxy(['route', 'https://Example.COM/path?q=1']));
-    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
-    assert.deepStrictEqual(result.data, { rules: ['example.com'], count: 1 });
-  });
-
-  test('loopback refuse', async () => {
-    const result = await captureOutput(() => handleProxy(['route', 'localhost']));
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.data.error, 'loopback hosts cannot be routed');
-  });
-
-  test('unroute of a missing host succeeds', async () => {
-    const current = readProxyJson()?.rules ?? [];
-    const result = await captureOutput(() => handleProxy(['unroute', 'nope.example']));
-    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
-    assert.deepStrictEqual(result.data, { rules: current, count: current.length });
   });
 
   test('rotate-ip changes only the session id', async () => {
@@ -195,49 +171,56 @@ describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () =
     assert.strictEqual(api.state.session_id, sessionId);
   });
 
-  test('set-geo sets, clears, and rejects neither/both', async () => {
-    const status = await captureOutput(() => handleProxy(['status']));
-    assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
-    const connectionId = status.data.connectionId;
+  test('proxy-on --geo pins geo, no-ops when already in that geo, rotate-ip --geo all clears', async () => {
+    const first = await captureOutput(() => handleProxy(['proxy-on', '--geo', 'us_ca']));
+    assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
+    assert.strictEqual(first.data.egress, 'aluvia');
+    assert.strictEqual(first.data.targetGeo, 'us_ca');
+    assert.strictEqual(first.data.rotated, true);
 
-    const set = await captureOutput(() => handleProxy(['set-geo', 'us_ca']));
-    assert.strictEqual(set.isError, false, String(set.data.error ?? ''));
-    assert.deepStrictEqual(set.data, { targetGeo: 'us_ca', connectionId });
+    const again = await captureOutput(() => handleProxy(['proxy-on', '--geo', 'us_ca']));
+    assert.strictEqual(again.isError, false, String(again.data.error ?? ''));
+    assert.strictEqual(again.data.rotated, false);
+    assert.strictEqual(again.data.targetGeo, 'us_ca');
 
-    const cleared = await captureOutput(() => handleProxy(['set-geo', '--clear']));
-    assert.strictEqual(cleared.isError, false, String(cleared.data.error ?? ''));
-    assert.deepStrictEqual(cleared.data, { targetGeo: null, connectionId });
+    const rotated = await captureOutput(() => handleProxy(['rotate-ip', '--geo', 'all']));
+    assert.strictEqual(rotated.isError, false, String(rotated.data.error ?? ''));
+    assert.strictEqual(rotated.data.targetGeo, null);
+    assert.strictEqual(rotated.data.egress, 'aluvia');
+    assert.strictEqual(rotated.data.rotated, true);
 
-    const neither = await captureOutput(() => handleProxy(['set-geo']));
-    assert.strictEqual(neither.isError, true);
-    assert.strictEqual(neither.data.error, 'set-geo requires either geo or clear, not both');
-
-    const both = await captureOutput(() => handleProxy(['set-geo', 'us_ca', '--clear']));
-    assert.strictEqual(both.isError, true);
-    assert.strictEqual(both.data.error, 'set-geo requires either geo or clear, not both');
+    const gone = await captureOutput(() => handleProxy(['set-geo', 'us_ca']));
+    assert.strictEqual(gone.isError, true);
+    assert.match(String(gone.data.error), /proxy-on --geo/);
   });
 
-  test('route after stop is not-running', async () => {
+  test('rotate-ip turns proxy on when egress is direct', async () => {
+    const off = await captureOutput(() => handleProxy(['proxy-off']));
+    assert.strictEqual(off.isError, false, String(off.data.error ?? ''));
+    assert.strictEqual(off.data.egress, 'direct');
+
+    const rotated = await captureOutput(() => handleProxy(['rotate-ip']));
+    assert.strictEqual(rotated.isError, false, String(rotated.data.error ?? ''));
+    assert.strictEqual(rotated.data.egress, 'aluvia');
+    assert.strictEqual(rotated.data.rotated, true);
+  });
+
+  test('proxy-on after stop is not-running', async () => {
     const stopped = await captureOutput(() => handleProxy(['stop']));
     assert.strictEqual(stopped.isError, false);
-    const result = await captureOutput(() => handleProxy(['route', 'example.com']));
+    const result = await captureOutput(() => handleProxy(['proxy-on']));
     assert.strictEqual(result.isError, true);
     assert.strictEqual(result.data.error, NOT_RUNNING);
   });
 
   test('PATCH failure leaves memory unchanged', async () => {
     await api.close();
-    const routed = await captureOutput(() => handleProxy(['route', 'example.com']));
+    const routed = await captureOutput(() => handleProxy(['proxy-on']));
     assert.strictEqual(routed.isError, true);
     const status = await captureOutput(() => handleProxy(['status']));
     assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
     assert.deepStrictEqual(status.data.rules, []);
-  });
-
-  test('missing host', async () => {
-    const result = await captureOutput(() => handleProxy(['route']));
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.data.error, 'host is required');
+    assert.strictEqual(status.data.egress, 'direct');
   });
 
   test('control up, data port dead', async () => {
@@ -275,7 +258,7 @@ describe('proxy route / unroute / rotate-ip / set-geo', { concurrency: 1 }, () =
         rules: [],
         attach: defaultAttach(home),
       });
-      const result = await captureOutput(() => handleProxy(['route', 'example.com']));
+      const result = await captureOutput(() => handleProxy(['proxy-on']));
       assert.strictEqual(result.isError, true);
       assert.strictEqual(result.data.error, DATA_PORT_UNHEALTHY);
     } finally {

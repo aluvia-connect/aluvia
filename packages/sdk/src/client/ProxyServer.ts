@@ -55,6 +55,18 @@ export class ProxyServer {
     return closed;
   }
 
+  closeAllConnections(): number {
+    if (!this.server) return 0;
+    let closed = 0;
+    for (const ids of this.hostConnections.values()) {
+      for (const id of [...ids]) {
+        this.server.closeConnection(id);
+        closed += 1;
+      }
+    }
+    return closed;
+  }
+
   constructor(configManager: ConfigManager, options?: { logLevel?: LogLevel }) {
     this.configManager = configManager;
     this.logger = new Logger(options?.logLevel ?? 'info');

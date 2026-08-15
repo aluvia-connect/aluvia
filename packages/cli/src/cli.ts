@@ -25,18 +25,16 @@ function printHelp(toStderr = false): void {
   const log = toStderr ? console.error : console.log;
   log('Aluvia CLI\n');
   log(
-    'A first setup or session command starts a free trial (no API key). When the trial is used up, run `aluvia auth` or `aluvia upstream <url>`.\n',
+    'A first setup starts a free trial (no API key). If the trial is used up, ask the human for an API key or their own proxy URL, then run `aluvia auth --key <key>` or `aluvia upstream <url>`. Do not edit environment variables.\n',
   );
   log('Usage:');
-  log('  aluvia setup [options]                      Start proxyd and attach the GUI browser');
-  log('  aluvia start [options]                      Start the local egress daemon');
+  log('  aluvia setup --url <page>                   Start proxyd and aim the GUI browser');
+  log('  aluvia start                                Start the local egress daemon');
   log('  aluvia stop                                 Stop the local egress daemon');
   log('  aluvia status                               Show daemon status');
-  log('  aluvia route <host>                         Send a hostname through Aluvia');
-  log('  aluvia unroute <host>                       Stop sending a hostname through Aluvia');
-  log('  aluvia attach                               Point the GUI browser at the local proxy');
-  log('  aluvia rotate-ip                            Rotate the sticky upstream IP');
-  log('  aluvia set-geo <geo>                        Set or clear target geo');
+  log('  aluvia proxy-on [--geo <geo>]               Send all browser traffic through Aluvia');
+  log('  aluvia proxy-off                            Send browser traffic direct (daemon stays up)');
+  log('  aluvia rotate-ip [--geo <geo>]              New exit IP (turns proxy on if needed)');
   log('  aluvia upstream <url>                       Use your own proxy (no Aluvia account)\n');
   log('  aluvia session start <url> [options]       Start a headless browser session');
   log('  aluvia session close [options]              Stop a browser session');
@@ -48,7 +46,8 @@ function printHelp(toStderr = false): void {
   log('  aluvia account                              Show account info');
   log('  aluvia account usage [options]              Show usage stats');
   log('  aluvia geos                                 List available geos\n');
-  log('  aluvia auth                                 Log in and store your API key');
+  log('  aluvia auth --key <key>                     Save an API key the human pasted');
+  log('  aluvia auth                                 Human opens the printed link on their machine');
   log('  aluvia auth status                          Show whether you are authenticated');
   log('  aluvia auth logout                          Remove the stored API key');
   log('  aluvia help [--json]                        Show this help\n');
@@ -70,24 +69,21 @@ function printHelp(toStderr = false): void {
   log('Session set-geo:');
   log('  <geo>                      Geo code to set (e.g. "US")');
   log('  --clear                    Clear target geo\n');
-  log('Daemon start / setup options:');
-  log('  --port <n>                 Data plane port (default 18787)');
-  log('  --control-port <n>         Control plane port (default 18788)');
-  log('  --connection-id <id>       Use a specific connection ID\n');
-  log('Daemon set-geo:');
-  log('  <geo>                      Geo code to set (e.g. "US")');
-  log('  --clear                    Clear target geo\n');
+  log('setup:');
+  log('  --url <url>                Blocked page to reopen after the one Chrome restart\n');
+  log('proxy-on / rotate-ip:');
+  log('  --geo <geo>                Pin exit geo (e.g. "US"). `--geo all` uses every geo.\n');
   log('Account usage options:');
   log('  --start <ISO8601>          Start date filter');
   log('  --end <ISO8601>            End date filter\n');
   log('Environment:');
-  log('  ALUVIA_API_KEY             Optional. Takes precedence over the key stored by `aluvia auth`.');
-  log('  ALUVIA_UPSTREAM            Optional. Bring-your-own proxy URL (skips Aluvia auth).');
+  log('  ALUVIA_API_KEY             Optional override. Agents should run `aluvia auth --key`, not set this.');
   log(
-    '  ALUVIA_HOME                Optional. Default /workspace/.aluvia when /workspace exists, else ~/.aluvia.',
+    '  ALUVIA_UPSTREAM            Optional override. Agents should run `aluvia upstream <url>`, not set this.',
   );
-  log('  ALUVIA_PROXY_PORT          Optional. Data port (default 18787).');
-  log('  ALUVIA_PROXY_CONTROL_PORT  Optional. Control port (default 18788).\n');
+  log(
+    '  ALUVIA_HOME                Optional. Default /workspace/.aluvia when /workspace exists, else ~/.aluvia.\n',
+  );
   log('Output:');
   log('  All commands output JSON to stdout.');
 }
@@ -188,27 +184,18 @@ export function buildHelpJson(): {
       },
       {
         command: 'setup',
-        description: 'Start the daemon and attach the GUI browser',
+        description: 'Start the daemon and aim the GUI browser',
         options: [
-          { flag: '--port <n>', description: 'Data plane port (default 18787)' },
-          { flag: '--control-port <n>', description: 'Control plane port (default 18788)' },
           {
-            flag: '--connection-id <id>',
-            description: 'Use a specific connection ID',
+            flag: '--url <url>',
+            description: 'Blocked page to reopen after the one Chrome restart',
           },
         ],
       },
       {
         command: 'start',
         description: 'Start the local egress daemon',
-        options: [
-          { flag: '--port <n>', description: 'Data plane port (default 18787)' },
-          { flag: '--control-port <n>', description: 'Control plane port (default 18788)' },
-          {
-            flag: '--connection-id <id>',
-            description: 'Use a specific connection ID',
-          },
-        ],
+        options: [],
       },
       {
         command: 'stop',
@@ -221,29 +208,29 @@ export function buildHelpJson(): {
         options: [],
       },
       {
-        command: 'route <host>',
-        description: 'Send a hostname through Aluvia',
-        options: [],
+        command: 'proxy-on',
+        description: 'Send all browser traffic through Aluvia',
+        options: [
+          {
+            flag: '--geo <geo>',
+            description: 'Use an IP in this geo. `--geo all` uses every geo.',
+          },
+        ],
       },
       {
-        command: 'unroute <host>',
-        description: 'Stop sending a hostname through Aluvia',
-        options: [],
-      },
-      {
-        command: 'attach',
-        description: 'Point the GUI browser at the local proxy',
+        command: 'proxy-off',
+        description: 'Send browser traffic direct (daemon stays up)',
         options: [],
       },
       {
         command: 'rotate-ip',
-        description: 'Rotate the sticky upstream IP',
-        options: [],
-      },
-      {
-        command: 'set-geo <geo>',
-        description: 'Set or clear target geo',
-        options: [{ flag: '--clear', description: 'Clear target geo' }],
+        description: 'New exit IP (turns proxy on if needed)',
+        options: [
+          {
+            flag: '--geo <geo>',
+            description: 'Rotate in this geo (or the previously pinned geo). `--geo all` uses every geo.',
+          },
+        ],
       },
       {
         command: 'upstream <url>',
@@ -269,8 +256,13 @@ export function buildHelpJson(): {
         options: [],
       },
       {
+        command: 'auth --key <key>',
+        description: 'Save an API key the human pasted (never printed)',
+        options: [],
+      },
+      {
         command: 'auth',
-        description: 'Log in to claim a trial or buy data (open the printed link in any browser)',
+        description: 'Log in to claim a trial or buy data (human opens the printed link)',
         options: [],
       },
       {
@@ -289,13 +281,7 @@ export function buildHelpJson(): {
         options: [{ flag: '--json', description: 'Output help as JSON' }],
       },
     ],
-    environment: [
-      'ALUVIA_API_KEY',
-      'ALUVIA_HOME',
-      'ALUVIA_UPSTREAM',
-      'ALUVIA_PROXY_PORT',
-      'ALUVIA_PROXY_CONTROL_PORT',
-    ],
+    environment: ['ALUVIA_API_KEY', 'ALUVIA_HOME', 'ALUVIA_UPSTREAM'],
   };
 }
 
@@ -316,8 +302,8 @@ const PROXY_TOP_LEVEL = new Set([
   'start',
   'stop',
   'status',
-  'route',
-  'unroute',
+  'proxy-on',
+  'proxy-off',
   'attach',
   'upstream',
   'rotate-ip',
