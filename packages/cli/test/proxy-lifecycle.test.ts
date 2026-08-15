@@ -106,13 +106,13 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.deepStrictEqual(api.requests, []);
   });
 
-  test('upstream recycles a running daemon so the new URL applies', async () => {
+  test('proxy-provider recycles a running daemon so the new URL applies', async () => {
     const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
     assert.strictEqual(started.isError, false, String(started.data.error ?? ''));
     const before = readProxyJson();
     assert.ok(before?.pid);
 
-    const result = await captureOutput(() => handleProxy(['upstream', 'http://user:pass@127.0.0.1:9']));
+    const result = await captureOutput(() => handleProxy(['proxy-provider', 'http://user:pass@127.0.0.1:9']));
     assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
     assert.strictEqual(result.data.provider, 'custom');
     assert.strictEqual(result.data.upstreamHost, '127.0.0.1');
@@ -123,6 +123,11 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.ok(after?.ready);
     assert.ok(after.pid);
     assert.notStrictEqual(after.pid, before.pid);
+
+    const back = await captureOutput(() => handleProxy(['proxy-provider', 'aluvia']));
+    assert.strictEqual(back.isError, false, String(back.data.error ?? ''));
+    assert.strictEqual(back.data.provider, 'aluvia');
+    assert.strictEqual(back.data.recycled, true);
   });
 
   test('start maps 402 to payment_required', async () => {
@@ -131,7 +136,8 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
     assert.strictEqual(result.isError, true);
     assert.strictEqual(result.data.code, 'payment_required');
-    assert.strictEqual(result.data.claim_url, 'https://dashboard.aluvia.io/cli-auth');
+    assert.strictEqual(result.data.claim_url, 'https://dashboard.aluvia.io/cli-auth?cli_code=user-code-1');
+    assert.match(String(result.data.next), /aluvia auth login/);
   });
 
   test('start writes proxy.json + proxy.log under ALUVIA_HOME', async () => {

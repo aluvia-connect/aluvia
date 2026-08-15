@@ -57,7 +57,7 @@ export function paymentRequiredFromBody(body: unknown): PaymentRequiredError {
   }
   return new PaymentRequiredError(
     maybeError?.error.message ??
-      'Trial data is used up. Ask the human for an API key (`aluvia auth --key`) or a proxy URL (`aluvia upstream <url>`).',
+      'Trial data is used up. Ask the human for an API key (`aluvia auth <key>`) or a proxy URL (`aluvia proxy-provider <url>`).',
     claimUrl,
   );
 }

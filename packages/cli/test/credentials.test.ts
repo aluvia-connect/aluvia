@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PaymentRequiredError } from '@aluvia/sdk';
 import { captureOutput } from '../src/mcp-helpers.js';
-import { handleAuth } from '../src/auth.js';
+import { handleAuth, paymentRequiredPayload } from '../src/auth.js';
 import { paymentRequiredOutput, resolveCredential } from '../src/api-helpers.js';
 import {
   ensureInstallId,
@@ -58,6 +58,44 @@ describe('credential resolver', { concurrency: 1 }, () => {
     assert.strictEqual(byo.kind === 'byo' && byo.upstream.host, 'byo.example');
   });
 
+  test('paymentRequiredPayload uses the auth-login claim URL', async () => {
+    tempHome();
+    ensureInstallId();
+    const origFetch = globalThis.fetch;
+    let initCalls = 0;
+    globalThis.fetch = (async (url: string | URL) => {
+      if (String(url).includes('/auth/cli/init')) {
+        initCalls += 1;
+        return new Response(
+          JSON.stringify({
+            device_code: 'dev-1',
+            user_code: 'ABCD',
+            verification_uri: 'https://dashboard.aluvia.io/cli-auth',
+            verification_uri_complete: 'https://dashboard.aluvia.io/cli-auth?cli_code=ABCD',
+            interval: 5,
+            expires_in: 600,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error(`unexpected fetch ${String(url)}`);
+    }) as typeof fetch;
+    try {
+      const first = await paymentRequiredPayload(
+        new PaymentRequiredError('used up', 'https://dashboard.aluvia.io/cli-auth'),
+      );
+      assert.strictEqual(first.claim_url, 'https://dashboard.aluvia.io/cli-auth?cli_code=ABCD');
+      assert.strictEqual(first.code, 'payment_required');
+      const second = await paymentRequiredPayload(
+        new PaymentRequiredError('used up', 'https://dashboard.aluvia.io/cli-auth'),
+      );
+      assert.strictEqual(second.claim_url, first.claim_url);
+      assert.strictEqual(initCalls, 1);
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   test('paymentRequiredOutput maps PaymentRequiredError', () => {
     const err = new PaymentRequiredError('used up', 'https://dashboard.aluvia.io/cli-auth');
     assert.deepStrictEqual(paymentRequiredOutput(err), {
@@ -68,7 +106,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
     assert.strictEqual(paymentRequiredOutput(new Error('nope')), null);
   });
 
-  test('auth --key saves the key and does not echo it', async () => {
+  test('auth <key> saves the key and does not echo it', async () => {
     tempHome();
     const secret = 'aluvia_secret_test_key';
     const origFetch = globalThis.fetch;
@@ -82,7 +120,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
       throw new Error(`unexpected fetch ${String(url)}`);
     }) as typeof fetch;
     try {
-      const result = await captureOutput(() => handleAuth(['--key', secret]));
+      const result = await captureOutput(() => handleAuth([secret]));
       assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
       assert.strictEqual(result.data.status, 'authenticated');
       assert.strictEqual(getStoredApiKey(), secret);
@@ -93,14 +131,40 @@ describe('credential resolver', { concurrency: 1 }, () => {
     }
   });
 
-  test('auth --key without a value errors', async () => {
+  test('auth with no args or --key errors', async () => {
     tempHome();
-    const result = await captureOutput(() => handleAuth(['--key']));
-    assert.strictEqual(result.isError, true);
-    assert.match(String(result.data.error), /Usage: aluvia auth --key/);
+    const empty = await captureOutput(() => handleAuth([]));
+    assert.strictEqual(empty.isError, true);
+    assert.match(String(empty.data.error), /aluvia auth <key>/);
+    const dashed = await captureOutput(() => handleAuth(['--key', 'secret']));
+    assert.strictEqual(dashed.isError, true);
+    assert.match(String(dashed.data.error), /aluvia auth <key>/);
   });
 
-  test('auth init sends stored install_id', async () => {
+  test('auth status reports trial, stored key, and custom provider', async () => {
+    tempHome();
+    ensureInstallId();
+    const trial = await captureOutput(() => handleAuth(['status']));
+    assert.strictEqual(trial.isError, false);
+    assert.deepStrictEqual(trial.data, { authenticated: false, provider: 'aluvia', trial: true });
+
+    saveApiKey('stored-token');
+    const keyed = await captureOutput(() => handleAuth(['status']));
+    assert.strictEqual(keyed.isError, false);
+    assert.deepStrictEqual(keyed.data, {
+      authenticated: true,
+      source: 'config',
+      provider: 'aluvia',
+      configFile: '~/.aluvia/config.json',
+    });
+
+    saveUpstream('http://user:pass@byo.example:8080');
+    const byo = await captureOutput(() => handleAuth(['status']));
+    assert.strictEqual(byo.isError, false);
+    assert.deepStrictEqual(byo.data, { authenticated: false, provider: 'custom' });
+  });
+
+  test('auth login sends stored install_id', async () => {
     tempHome();
     const installId = ensureInstallId();
     const origFetch = globalThis.fetch;
@@ -113,7 +177,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
       throw new Error(`unexpected fetch ${String(url)}`);
     }) as typeof fetch;
     try {
-      const result = await captureOutput(() => handleAuth([]));
+      const result = await captureOutput(() => handleAuth(['login']));
       assert.strictEqual(result.isError, true);
       assert.match(String(result.data.error), /Could not start authentication/);
       assert.ok(initBody && typeof initBody === 'object');

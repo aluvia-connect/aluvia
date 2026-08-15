@@ -49,7 +49,7 @@ export function requireApi(): AluviaApi {
   if (cred.kind === 'byo') {
     return output(
       {
-        error: 'This command needs the Aluvia network. Run `aluvia upstream --clear`, then `aluvia auth`.',
+        error: 'This command needs the Aluvia network. Run `aluvia proxy-provider aluvia`.',
       },
       1,
     );
@@ -71,9 +71,10 @@ export function paymentRequiredOutput(err: unknown): Record<string, unknown> | n
   return null;
 }
 
-export function outputIfPaymentRequired(err: unknown): void {
-  const payload = paymentRequiredOutput(err);
-  if (payload) output(payload, 1);
+export async function outputIfPaymentRequired(err: unknown): Promise<void> {
+  if (!(err instanceof PaymentRequiredError)) return;
+  const { paymentRequiredPayload } = await import('./auth.js');
+  output(await paymentRequiredPayload(err), 1);
 }
 
 export function resolveSession(sessionName?: string): {

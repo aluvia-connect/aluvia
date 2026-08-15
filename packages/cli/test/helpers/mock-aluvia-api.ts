@@ -55,13 +55,23 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
       });
     };
 
+    if (req.method === 'POST' && url === '/auth/cli/init') {
+      return send(200, {
+        device_code: 'device-code-test',
+        user_code: 'user-code-1',
+        verification_uri: 'https://dashboard.aluvia.io/cli-auth',
+        verification_uri_complete: 'https://dashboard.aluvia.io/cli-auth?cli_code=user-code-1',
+        interval: 5,
+        expires_in: 600,
+      });
+    }
     if (paymentRequired && url.startsWith('/account/connections')) {
       return send(402, {
         success: false,
         error: {
           code: 'payment_required',
           message:
-            'Trial data is used up. Ask the human for an API key (`aluvia auth --key`) or a proxy URL (`aluvia upstream <url>`).',
+            'Trial data is used up. Ask the human for an API key (`aluvia auth <key>`) or a proxy URL (`aluvia proxy-provider <url>`).',
           claim_url: 'https://dashboard.aluvia.io/cli-auth',
         },
       });

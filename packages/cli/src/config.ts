@@ -9,17 +9,26 @@ import path from 'node:path';
  * `$ALUVIA_HOME/config.json` (default `/workspace/.aluvia` when `/workspace`
  * exists, else `~/.aluvia`) with restrictive permissions.
  *
- * Agents persist credentials with `aluvia auth --key` and `aluvia upstream`.
+ * Agents persist credentials with `aluvia auth <key>` and `aluvia proxy-provider`.
  * Resolution order lives in api-helpers.ts: stored/env BYO upstream, then
  * ALUVIA_API_KEY / stored apiKey, then installId. Env vars are optional
  * overrides, not the human/agent path.
  */
+
+export type PendingCliAuth = {
+  deviceCode: string;
+  userCode: string;
+  claimUrl: string;
+  interval: number;
+  expiresAt: number;
+};
 
 export interface AluviaConfig {
   apiKey?: string;
   installId?: string;
   upstream?: string;
   source?: string;
+  cliAuth?: PendingCliAuth;
 }
 
 export type ParsedUpstream = {
@@ -159,6 +168,34 @@ export function clearApiKey(): boolean {
   delete config.apiKey;
   writeConfig(config);
   return true;
+}
+
+export function getPendingCliAuth(): PendingCliAuth | undefined {
+  const raw = readConfig().cliAuth;
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (typeof raw.deviceCode !== 'string' || typeof raw.claimUrl !== 'string') return undefined;
+  if (typeof raw.userCode !== 'string' || typeof raw.expiresAt !== 'number') return undefined;
+  if (!Number.isFinite(raw.expiresAt) || raw.expiresAt <= Date.now()) return undefined;
+  return {
+    deviceCode: raw.deviceCode,
+    userCode: raw.userCode,
+    claimUrl: raw.claimUrl,
+    interval: typeof raw.interval === 'number' && raw.interval > 0 ? raw.interval : 5,
+    expiresAt: raw.expiresAt,
+  };
+}
+
+export function savePendingCliAuth(session: PendingCliAuth): void {
+  const config = readConfig();
+  config.cliAuth = session;
+  writeConfig(config);
+}
+
+export function clearPendingCliAuth(): void {
+  const config = readConfig();
+  if (!config.cliAuth) return;
+  delete config.cliAuth;
+  writeConfig(config);
 }
 
 export function getStoredUpstream(): string | undefined {

@@ -45,8 +45,13 @@ describe('proxy skill install', () => {
     assert.ok(body.includes('`what` explains every field'));
     assert.ok(body.includes('aluvia proxy-off'));
     assert.ok(body.includes('payment_required'));
-    assert.ok(body.includes('aluvia auth --key'));
-    assert.ok(body.includes('aluvia upstream <url>'));
+    assert.ok(body.includes('aluvia auth <that key>'));
+    assert.ok(body.includes('aluvia proxy-provider <url>'));
+    assert.ok(body.includes('aluvia proxy-provider aluvia'));
+    assert.ok(body.includes('aluvia auth login'));
+    assert.ok(!body.includes('aluvia auth --key'));
+    assert.ok(!body.includes('aluvia upstream'));
+    assert.ok(!body.includes('aluvia session'));
     assert.ok(body.includes('Ask them in chat'));
     assert.ok(!body.includes('ALUVIA_API_KEY'));
     assert.ok(!body.includes('ALUVIA_UPSTREAM'));

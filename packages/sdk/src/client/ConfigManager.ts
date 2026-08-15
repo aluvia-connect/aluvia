@@ -319,7 +319,9 @@ export class ConfigManager {
   async setConfig(body: Record<string, unknown>): Promise<ConnectionNetworkConfig | null> {
     if (this.localOnly) {
       if (body['session_id'] !== undefined || body['target_geo'] !== undefined) {
-        throw new ApiError('rotate-ip and set-geo require the Aluvia network. Run `aluvia auth` or unset your custom upstream.');
+        throw new ApiError(
+          'rotate-ip and --geo require the Aluvia network. Run `aluvia proxy-provider aluvia`.',
+        );
       }
       const current = this.config;
       const rules = Array.isArray(body['rules'])

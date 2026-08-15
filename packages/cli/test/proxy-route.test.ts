@@ -171,7 +171,7 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     assert.strictEqual(api.state.session_id, sessionId);
   });
 
-  test('proxy-on --geo pins geo, no-ops when already in that geo, rotate-ip --geo all clears', async () => {
+  test('proxy-on --geo pins, no-ops in that geo, omit --geo selects any geo', async () => {
     const first = await captureOutput(() => handleProxy(['proxy-on', '--geo', 'us_ca']));
     assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
     assert.strictEqual(first.data.egress, 'aluvia');
@@ -183,7 +183,21 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     assert.strictEqual(again.data.rotated, false);
     assert.strictEqual(again.data.targetGeo, 'us_ca');
 
-    const rotated = await captureOutput(() => handleProxy(['rotate-ip', '--geo', 'all']));
+    const unpinned = await captureOutput(() => handleProxy(['proxy-on']));
+    assert.strictEqual(unpinned.isError, false, String(unpinned.data.error ?? ''));
+    assert.strictEqual(unpinned.data.targetGeo, null);
+    assert.strictEqual(unpinned.data.rotated, true);
+
+    const alreadyAny = await captureOutput(() => handleProxy(['proxy-on']));
+    assert.strictEqual(alreadyAny.isError, false, String(alreadyAny.data.error ?? ''));
+    assert.strictEqual(alreadyAny.data.rotated, false);
+    assert.strictEqual(alreadyAny.data.targetGeo, null);
+
+    const pinnedAgain = await captureOutput(() => handleProxy(['rotate-ip', '--geo', 'us_ca']));
+    assert.strictEqual(pinnedAgain.isError, false, String(pinnedAgain.data.error ?? ''));
+    assert.strictEqual(pinnedAgain.data.targetGeo, 'us_ca');
+
+    const rotated = await captureOutput(() => handleProxy(['rotate-ip']));
     assert.strictEqual(rotated.isError, false, String(rotated.data.error ?? ''));
     assert.strictEqual(rotated.data.targetGeo, null);
     assert.strictEqual(rotated.data.egress, 'aluvia');
@@ -191,7 +205,7 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
 
     const gone = await captureOutput(() => handleProxy(['set-geo', 'us_ca']));
     assert.strictEqual(gone.isError, true);
-    assert.match(String(gone.data.error), /proxy-on --geo/);
+    assert.match(String(gone.data.error), /Unknown command/);
   });
 
   test('rotate-ip turns proxy on when egress is direct', async () => {

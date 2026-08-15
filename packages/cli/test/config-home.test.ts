@@ -77,7 +77,7 @@ describe('configDir ALUVIA_HOME', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  test('ensureInstallId is sticky and logout keeps it', async () => {
+  test('ensureInstallId is sticky and clearing a key keeps it', async () => {
     const fs = await import('node:fs');
     const os = await import('node:os');
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-home-'));

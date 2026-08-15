@@ -209,7 +209,7 @@ async function handleSessionRotateIp(args: string[]): Promise<void> {
   try {
     await api.account.connections.patch(connId, { session_id: newSessionId });
   } catch (err) {
-    outputIfPaymentRequired(err);
+    await outputIfPaymentRequired(err);
     throw err;
   }
 
@@ -262,7 +262,7 @@ async function handleSessionSetGeo(args: string[]): Promise<void> {
   try {
     await api.account.connections.patch(connId, { target_geo: targetGeo });
   } catch (err) {
-    outputIfPaymentRequired(err);
+    await outputIfPaymentRequired(err);
     throw err;
   }
 
@@ -317,7 +317,7 @@ async function handleSessionSetRules(args: string[]): Promise<void> {
   try {
     conn = await api.account.connections.get(connId);
   } catch (err) {
-    outputIfPaymentRequired(err);
+    await outputIfPaymentRequired(err);
     throw err;
   }
   const currentRules: string[] = conn?.rules ?? [];

@@ -2,9 +2,9 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { isProcessAlive } from '@aluvia/sdk';
+import { isProcessAlive, PaymentRequiredError } from '@aluvia/sdk';
 import { resolveCredential } from './api-helpers.js';
-import { clearUpstream, saveUpstream } from './config.js';
+import { clearUpstream, getStoredUpstream, parseUpstreamUrl, saveUpstream } from './config.js';
 import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
@@ -25,8 +25,7 @@ import {
 
 const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
 const CONTROL_TIMEOUT = 'proxyd did not respond. Run `aluvia status`.';
-const BYO_NETWORK =
-  'This command needs the Aluvia network. Run `aluvia upstream --clear`, then `aluvia auth`.';
+const BYO_NETWORK = 'This command needs the Aluvia network. Run `aluvia proxy-provider aluvia`.';
 
 function parsePositiveInt(raw: string | undefined): number | undefined {
   if (raw == null || raw.trim() === '') return undefined;
@@ -169,18 +168,12 @@ function statusFields(state: ProxyJson, healthy: boolean, extra?: Record<string,
   };
 }
 
-function failIfDaemonDied(logFile: string): never {
+async function failIfDaemonDied(logFile: string): Promise<never> {
   const dead = readProxyJson();
   if (dead?.code === 'payment_required') {
-    output(
-      {
-        error: dead.error ?? 'Trial data is used up.',
-        code: 'payment_required',
-        claim_url: dead.claimUrl,
-        logFile,
-      },
-      1,
-    );
+    const { paymentRequiredPayload } = await import('./auth.js');
+    const err = new PaymentRequiredError(dead.error ?? 'Trial data is used up.', dead.claimUrl);
+    output({ ...(await paymentRequiredPayload(err)), logFile }, 1);
   }
   if (dead?.error) {
     output(
@@ -321,7 +314,7 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
         try {
           if (child.pid && !isProcessAlive(child.pid)) {
             clearInterval(poll);
-            failIfDaemonDied(logFile);
+            await failIfDaemonDied(logFile);
           }
 
           const state = readProxyJson();
@@ -340,7 +333,7 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
           if (attempts >= maxAttempts) {
             clearInterval(poll);
             const alive = child.pid ? isProcessAlive(child.pid) : false;
-            if (!alive) failIfDaemonDied(logFile);
+            if (!alive) await failIfDaemonDied(logFile);
             output({ error: 'proxyd is still initializing (timeout).', logFile }, 1);
           }
         } catch (err) {
@@ -635,13 +628,22 @@ function parseGeoFlag(args: string[]): { specified: boolean; geo: string | null 
     if (args[i] === '--geo') {
       const value = args[i + 1];
       if (value == null || value.startsWith('-')) {
-        output({ error: 'Usage: --geo <geo> | --geo all' }, 1);
+        output({ error: 'Usage: --geo <geo> (e.g. --geo US)' }, 1);
       }
-      if (value.toLowerCase() === 'all') return { specified: true, geo: null };
       return { specified: true, geo: value };
     }
   }
   return { specified: false, geo: null };
+}
+
+function desiredGeo(
+  flag: { specified: boolean; geo: string | null },
+  current: string | null,
+  byo: boolean,
+): string | null {
+  if (flag.specified) return flag.geo;
+  if (byo) return current;
+  return null;
 }
 
 async function readControlStatus(): Promise<{
@@ -696,11 +698,13 @@ async function handleProxySwitch(on: boolean): Promise<void> {
 async function handleProxyOn(args: string[]): Promise<void> {
   await requireHealthyDaemon();
   const geoFlag = parseGeoFlag(args);
-  if (geoFlag.specified && resolveCredential().kind === 'byo') {
+  const byo = resolveCredential().kind === 'byo';
+  if (geoFlag.specified && byo) {
     output({ error: BYO_NETWORK }, 1);
   }
   const before = await readControlStatus();
-  const geoSame = !geoFlag.specified || before.targetGeo === geoFlag.geo;
+  const geo = desiredGeo(geoFlag, before.targetGeo, byo);
+  const geoSame = before.targetGeo === geo;
   if (before.egress === 'aluvia' && geoSame) {
     output({
       egress: 'aluvia',
@@ -712,8 +716,8 @@ async function handleProxyOn(args: string[]): Promise<void> {
     });
   }
 
-  if (geoFlag.specified && before.targetGeo !== geoFlag.geo) {
-    await postSetGeo(geoFlag.geo);
+  if (!geoSame) {
+    await postSetGeo(geo);
   }
   if (before.egress !== 'aluvia') {
     await postEgress(true);
@@ -722,7 +726,7 @@ async function handleProxyOn(args: string[]): Promise<void> {
   let rotated = false;
   let sessionId: string | undefined;
   let connectionId: unknown;
-  if (geoFlag.specified && before.targetGeo !== geoFlag.geo) {
+  if (!geoSame) {
     const result = await postRotate();
     rotated = true;
     sessionId = result.sessionId;
@@ -748,8 +752,9 @@ async function handleRotateIp(args: string[]): Promise<void> {
   await requireHealthyDaemon();
   const geoFlag = parseGeoFlag(args);
   const before = await readControlStatus();
-  if (geoFlag.specified && before.targetGeo !== geoFlag.geo) {
-    await postSetGeo(geoFlag.geo);
+  const geo = desiredGeo(geoFlag, before.targetGeo, false);
+  if (before.targetGeo !== geo) {
+    await postSetGeo(geo);
   }
   if (before.egress !== 'aluvia') {
     await postEgress(true);
@@ -766,30 +771,23 @@ async function handleRotateIp(args: string[]): Promise<void> {
   });
 }
 
-function handleSetGeoRemoved(): never {
-  output(
-    {
-      error:
-        'Use `aluvia proxy-on --geo <geo>` or `aluvia rotate-ip --geo <geo>`. `--geo all` uses every geo.',
-    },
-    1,
-  );
-}
-
-async function handleUpstream(args: string[]): Promise<void> {
-  if (args.includes('--clear')) {
-    clearUpstream();
-    const { recycled } = await recycleDaemonIfRunning();
+async function handleProxyProvider(args: string[]): Promise<void> {
+  const raw = args.find((arg) => !arg.startsWith('-'));
+  if (!raw) {
+    const stored = getStoredUpstream();
+    if (stored) {
+      output({ provider: 'custom', upstreamHost: parseUpstreamUrl(stored).host });
+    }
+    output({ provider: 'aluvia' });
+  }
+  if (raw.toLowerCase() === 'aluvia') {
+    const changed = clearUpstream();
+    const recycled = changed ? (await recycleDaemonIfRunning()).recycled : false;
     output({
-      provider: 'none',
-      status: 'cleared',
+      provider: 'aluvia',
       recycled,
       next: credentialNext(recycled),
     });
-  }
-  const raw = args.find((arg) => !arg.startsWith('-'));
-  if (!raw) {
-    output({ error: 'Usage: aluvia upstream <url> | aluvia upstream --clear' }, 1);
   }
   let parsed;
   try {
@@ -826,17 +824,14 @@ export async function handleProxy(args: string[]): Promise<void> {
   if (subcommand === 'rotate-ip') {
     return handleRotateIp(args.slice(1));
   }
-  if (subcommand === 'set-geo') {
-    return handleSetGeoRemoved();
-  }
   if (subcommand === 'attach') {
     return handleAttach(args.slice(1));
   }
   if (subcommand === 'setup') {
     return handleSetup(args.slice(1));
   }
-  if (subcommand === 'upstream') {
-    return handleUpstream(args.slice(1));
+  if (subcommand === 'proxy-provider') {
+    return handleProxyProvider(args.slice(1));
   }
   output({ error: `Unknown command: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
 }

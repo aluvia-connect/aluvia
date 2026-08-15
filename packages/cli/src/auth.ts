@@ -1,17 +1,29 @@
-import { AluviaApi } from '@aluvia/sdk';
+import { AluviaApi, PaymentRequiredError } from '@aluvia/sdk';
 import {
   getStoredApiKey,
   getStoredInstallId,
   getStoredUpstream,
   saveApiKey,
-  clearApiKey,
   clearUpstream,
+  getPendingCliAuth,
+  savePendingCliAuth,
+  clearPendingCliAuth,
+  type PendingCliAuth,
 } from './config.js';
 import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
 
-const API_URL = 'https://api.aluvia.io';
+const DEFAULT_API_URL = 'https://api.aluvia.io';
+const DEFAULT_CLAIM_URL = 'https://dashboard.aluvia.io/cli-auth';
 const DEVICE_FLOW_TIMEOUT_MS = 600_000;
 const STORED_KEY_LOCATION = '~/.aluvia/config.json';
+
+export const PAYMENT_REQUIRED_NEXT =
+  'Show claim_url to the human. Then run `aluvia auth login` to wait until they finish. When that succeeds, retry.';
+
+function apiBaseUrl(): string {
+  const fromEnv = (process.env.ALUVIA_API_BASE_URL ?? '').trim();
+  return (fromEnv || DEFAULT_API_URL).replace(/\/$/, '');
+}
 
 function authOutput(data: Record<string, unknown>, exitCode = 0): never {
   if (isCapturing()) {
@@ -24,16 +36,7 @@ function authOutput(data: Record<string, unknown>, exitCode = 0): never {
   return undefined as never;
 }
 
-function parseAuthKey(args: string[]): string | null | undefined {
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--key') {
-      const value = args[i + 1];
-      if (value == null || value.startsWith('-')) return null;
-      return value;
-    }
-  }
-  return undefined;
-}
+const AUTH_USAGE = 'Usage: aluvia auth <key> | aluvia auth login | aluvia auth status';
 
 async function recycleAfterCredentialChange(): Promise<boolean> {
   const { recycleDaemonIfRunning } = await import('./proxy.js');
@@ -81,31 +84,70 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runAuth(): Promise<never> {
-  let init: DeviceInit;
+export async function ensureDeviceAuthSession(): Promise<PendingCliAuth> {
+  const existing = getPendingCliAuth();
+  if (existing) return existing;
+
+  const installId = getStoredInstallId();
+  const response = await fetch(`${apiBaseUrl()}/auth/cli/init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      label: `aluvia-cli@${process.platform}`,
+      ...(installId ? { install_id: installId } : {}),
+    }),
+  });
+  if (!response.ok) throw new Error(`init failed (HTTP ${response.status})`);
+  const init = (await response.json()) as DeviceInit;
+  const claimUrl =
+    typeof init.verification_uri_complete === 'string' && init.verification_uri_complete
+      ? init.verification_uri_complete
+      : `${DEFAULT_CLAIM_URL}?cli_code=${init.user_code}`;
+  const expiresInMs = Math.min((init.expires_in || 600) * 1000, DEVICE_FLOW_TIMEOUT_MS);
+  const session: PendingCliAuth = {
+    deviceCode: init.device_code,
+    userCode: init.user_code,
+    claimUrl,
+    interval: Math.max(1, init.interval || 5),
+    expiresAt: Date.now() + expiresInMs,
+  };
+  savePendingCliAuth(session);
+  return session;
+}
+
+export async function paymentRequiredPayload(err: PaymentRequiredError): Promise<Record<string, unknown>> {
+  let claimUrl = err.claimUrl || DEFAULT_CLAIM_URL;
   try {
-    const installId = getStoredInstallId();
-    const response = await fetch(`${API_URL}/auth/cli/init`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        label: `aluvia-cli@${process.platform}`,
-        ...(installId ? { install_id: installId } : {}),
-      }),
-    });
-    if (!response.ok) throw new Error(`init failed (HTTP ${response.status})`);
-    init = (await response.json()) as DeviceInit;
+    claimUrl = (await ensureDeviceAuthSession()).claimUrl;
+  } catch {
+    // Keep the API claim_url if device-flow init is down.
+  }
+  return {
+    error:
+      'Trial data is used up. Show the human claim_url. They open it on their machine, create an account or sign in, Authorize, then Buy data if asked.',
+    code: 'payment_required',
+    claim_url: claimUrl,
+    next: PAYMENT_REQUIRED_NEXT,
+  };
+}
+
+async function runAuth(): Promise<never> {
+  const alreadyShown = getPendingCliAuth() != null;
+  let session: PendingCliAuth;
+  try {
+    session = await ensureDeviceAuthSession();
   } catch (err) {
     return authOutput({ error: `Could not start authentication: ${(err as Error).message}` }, 1);
   }
 
-  console.error('Authenticate with Aluvia:\n');
-  console.error(`  1. Open: ${init.verification_uri_complete}`);
-  console.error(`  2. Confirm this code matches: ${init.user_code}\n`);
+  if (!alreadyShown) {
+    console.error('Authenticate with Aluvia:\n');
+    console.error(`  1. Open: ${session.claimUrl}`);
+    console.error(`  2. Confirm this code matches: ${session.userCode}\n`);
+  }
 
-  const intervalMs = Math.max(1, init.interval || 5) * 1000;
-  const deadline =
-    Date.now() + Math.min(init.expires_in * 1000 || DEVICE_FLOW_TIMEOUT_MS, DEVICE_FLOW_TIMEOUT_MS);
+  const intervalMs = session.interval * 1000;
+  const deadline = Math.min(session.expiresAt, Date.now() + DEVICE_FLOW_TIMEOUT_MS);
   let waitMs = intervalMs;
 
   while (Date.now() < deadline) {
@@ -113,10 +155,10 @@ async function runAuth(): Promise<never> {
     let status: string;
     let apiKey: string | undefined;
     try {
-      const response = await fetch(`${API_URL}/auth/cli/poll`, {
+      const response = await fetch(`${apiBaseUrl()}/auth/cli/poll`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code: init.device_code }),
+        body: JSON.stringify({ device_code: session.deviceCode }),
       });
       const data = (await response.json().catch(() => ({}))) as {
         status?: string;
@@ -129,23 +171,29 @@ async function runAuth(): Promise<never> {
     }
 
     if (status === 'approved' && apiKey) {
+      clearPendingCliAuth();
       return finishWithKey(apiKey);
     }
     if (status === 'denied') {
+      clearPendingCliAuth();
       return authOutput({ error: 'Authentication was denied in the browser.' }, 1);
     }
     if (status === 'expired' || status === 'invalid') {
-      return authOutput({ error: 'Authentication session expired. Run `aluvia auth` again.' }, 1);
+      clearPendingCliAuth();
+      return authOutput({ error: 'Authentication session expired. Run `aluvia auth login` again.' }, 1);
     }
     if (status === 'slow_down') {
       waitMs += 5000;
     }
   }
 
-  return authOutput({ error: 'Timed out waiting for approval. Run `aluvia auth` again.' }, 1);
+  return authOutput({ error: 'Timed out waiting for approval. Run `aluvia auth login` again.' }, 1);
 }
 
 function runStatus(): never {
+  if (getStoredUpstream()) {
+    return authOutput({ authenticated: false, provider: 'custom' });
+  }
   const envKey = (process.env.ALUVIA_API_KEY ?? '').trim();
   if (envKey) {
     return authOutput({ authenticated: true, source: 'env', provider: 'aluvia' });
@@ -158,45 +206,27 @@ function runStatus(): never {
       configFile: STORED_KEY_LOCATION,
     });
   }
-  if (getStoredUpstream()) {
-    return authOutput({ authenticated: false, provider: 'custom' });
-  }
   if (getStoredInstallId()) {
     return authOutput({ authenticated: false, provider: 'aluvia', trial: true });
   }
   return authOutput({ authenticated: false, provider: 'none' });
 }
 
-async function runLogout(): Promise<never> {
-  const removed = clearApiKey();
-  const recycled = removed ? await recycleAfterCredentialChange() : false;
-  return authOutput({
-    status: removed ? 'logged_out' : 'not_logged_in',
-    configFile: STORED_KEY_LOCATION,
-    recycled,
-  });
-}
-
 export async function handleAuth(args: string[]): Promise<void> {
   if (args.includes('--key')) {
-    const key = parseAuthKey(args);
-    if (!key) {
-      return authOutput({ error: 'Usage: aluvia auth --key <key>' }, 1);
-    }
-    return finishWithKey(key);
+    return authOutput({ error: AUTH_USAGE }, 1);
   }
 
   const subcommand = args.find((argument) => !argument.startsWith('-'));
-
+  if (!subcommand) {
+    return authOutput({ error: AUTH_USAGE }, 1);
+  }
   if (subcommand === 'status') {
     return runStatus();
   }
-  if (subcommand === 'logout') {
-    return runLogout();
-  }
-  if (subcommand) {
-    return authOutput({ error: `Unknown auth subcommand: '${subcommand}'.` }, 1);
+  if (subcommand === 'login') {
+    return runAuth();
   }
 
-  return runAuth();
+  return finishWithKey(subcommand);
 }

@@ -80,8 +80,7 @@ export function handleOpen({
   if (cred.kind === 'byo') {
     output(
       {
-        error:
-          'session start needs the Aluvia network. Run `aluvia upstream --clear`, then retry or `aluvia auth`.',
+        error: 'session start needs the Aluvia network. Run `aluvia proxy-provider aluvia`.',
       },
       1,
     );
@@ -138,69 +137,71 @@ export function handleOpen({
     let attempts = 0;
     const maxAttempts = 240; // 60 seconds max
     const poll = setInterval(() => {
-      attempts++;
+      void (async () => {
+        attempts++;
 
-      try {
-        // Early exit if daemon process died
-        if (child.pid && !isProcessAlive(child.pid)) {
-          clearInterval(poll);
-          const dead = readLock(session);
-          if (dead?.code === 'payment_required') {
+        try {
+          // Early exit if daemon process died
+          if (child.pid && !isProcessAlive(child.pid)) {
+            clearInterval(poll);
+            const dead = readLock(session);
+            if (dead?.code === 'payment_required') {
+              removeLock(session);
+              const { paymentRequiredPayload } = await import('./auth.js');
+              const err = new PaymentRequiredError(dead.error ?? 'Trial data is used up.', dead.claimUrl);
+              output(
+                {
+                  browserSession: session,
+                  ...(await paymentRequiredPayload(err)),
+                  logFile,
+                },
+                1,
+              );
+            }
             removeLock(session);
             output(
               {
                 browserSession: session,
-                error: dead.error ?? 'Trial data is used up.',
-                code: 'payment_required',
-                claim_url: dead.claimUrl ?? null,
+                error: 'Browser process exited unexpectedly.',
                 logFile,
               },
               1,
             );
           }
-          removeLock(session);
-          output(
-            {
-              browserSession: session,
-              error: 'Browser process exited unexpectedly.',
-              logFile,
-            },
-            1,
-          );
-        }
 
-        const lock = readLock(session);
-        if (lock && lock.ready) {
-          clearInterval(poll);
-          output({
-            browserSession: session,
-            pid: lock.pid,
-            startUrl: lock.url ?? null,
-            cdpUrl: lock.cdpUrl ?? null,
-            connectionId: lock.connectionId ?? null,
-            blockDetection: lock.blockDetection ?? false,
-            autoUnblock: lock.autoUnblock ?? false,
-          });
-        }
-        if (attempts >= maxAttempts) {
-          clearInterval(poll);
-          const alive = child.pid ? isProcessAlive(child.pid) : false;
-          output(
-            {
+          const lock = readLock(session);
+          if (lock && lock.ready) {
+            clearInterval(poll);
+            output({
               browserSession: session,
-              error: alive
-                ? 'Browser is still initializing (timeout).'
-                : 'Browser process exited unexpectedly.',
-              logFile,
-            },
-            1,
-          );
+              pid: lock.pid,
+              startUrl: lock.url ?? null,
+              cdpUrl: lock.cdpUrl ?? null,
+              connectionId: lock.connectionId ?? null,
+              blockDetection: lock.blockDetection ?? false,
+              autoUnblock: lock.autoUnblock ?? false,
+            });
+          }
+          if (attempts >= maxAttempts) {
+            clearInterval(poll);
+            const alive = child.pid ? isProcessAlive(child.pid) : false;
+            output(
+              {
+                browserSession: session,
+                error: alive
+                  ? 'Browser is still initializing (timeout).'
+                  : 'Browser process exited unexpectedly.',
+                logFile,
+              },
+              1,
+            );
+          }
+        } catch (err) {
+          // In MCP capture mode, output() throws MCPOutputCapture which we need to propagate
+          clearInterval(poll);
+          reject(err);
         }
-      } catch (err) {
-        // In MCP capture mode, output() throws MCPOutputCapture which we need to propagate
-        clearInterval(poll);
-        reject(err);
-      }
+      })();
     }, 250);
   });
 }

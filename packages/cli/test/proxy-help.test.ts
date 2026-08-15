@@ -14,12 +14,19 @@ describe('proxy help', () => {
       'proxy-on',
       'proxy-off',
       'rotate-ip',
-      'upstream <url>',
-      'auth --key <key>',
+      'proxy-provider aluvia',
+      'proxy-provider <url>',
+      'auth <key>',
+      'auth login',
     ]) {
       assert.ok(names.includes(verb), verb);
     }
     assert.ok(!names.includes('set-geo <geo>'));
+    assert.ok(!names.includes('attach'));
+    assert.ok(!names.includes('upstream <url>'));
+    assert.ok(!names.includes('auth --key <key>'));
+    assert.ok(!names.includes('auth logout'));
+    assert.ok(!names.some((name) => name.startsWith('session')));
     assert.ok(!names.some((name) => name.startsWith('proxy ')));
     const geoFlag = { flag: '--geo <geo>' };
     const proxyOn = help.commands.find((c) => c.command === 'proxy-on');
