@@ -32,7 +32,7 @@ describe('proxy.json', () => {
       sessionId: 'abc',
       targetGeo: null,
       rules: ['example.com'],
-      attach: defaultAttach(home),
+      attach: defaultAttach(),
     };
     writeProxyJson(data);
     assert.deepStrictEqual(readProxyJson(), data);

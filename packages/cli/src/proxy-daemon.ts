@@ -1,12 +1,15 @@
 import crypto from 'node:crypto';
-import { AluviaClient, PaymentRequiredError, isLoopbackHostname } from '@aluvia/sdk';
-import { configDir } from './config.js';
+import { PaymentRequiredError } from './net/errors.js';
+import { isLoopbackHostname } from './net/loopback.js';
+import { ConfigManager } from './net/config-manager.js';
+import { ProxyServer } from './net/proxy-server.js';
 import { createControlServer } from './proxy-control-server.js';
 import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
   defaultAttach,
   egressFromRules,
+  normalizeAttach,
   readProxyJson,
   writeProxyJson,
   type LastConnectSnapshot,
@@ -43,6 +46,16 @@ function urls(dataPort: number, controlPort: number): { proxyUrl: string; contro
   return {
     proxyUrl: `http://127.0.0.1:${dataPort}`,
     controlUrl: `http://127.0.0.1:${controlPort}`,
+  };
+}
+
+function networkState(config: ConfigManager) {
+  const c = config.getConfig();
+  return {
+    connectionId: config.connectionId,
+    sessionId: c?.sessionId ?? null,
+    targetGeo: c?.targetGeo ?? null,
+    rules: c?.rules ?? [],
   };
 }
 
@@ -103,40 +116,63 @@ export async function handleProxyDaemon(args: string[]): Promise<void> {
 export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
   const existing = readProxyJson();
   let attach: ProxyAttachState =
-    existing && existing.dataPort === opts.dataPort ? existing.attach : defaultAttach(configDir());
+    existing && existing.dataPort === opts.dataPort ? normalizeAttach(existing.attach) : defaultAttach();
   const { proxyUrl, controlUrl } = urls(opts.dataPort, opts.controlPort);
 
-  const client = new AluviaClient({
-    apiKey: opts.apiKey,
+  const apiKey = opts.apiKey ?? '';
+  const apiBaseUrl = opts.apiBaseUrl ?? 'https://api.aluvia.io/v1';
+  const gatewayProtocol = 'http';
+  const gatewayPort = opts.gatewayPort ?? 8080;
+  const logLevel = 'info' as const;
+
+  const config = new ConfigManager({
+    apiKey,
     installId: opts.installId,
-    upstream: opts.upstream,
-    startPlaywright: false,
-    localPort: opts.dataPort,
-    logLevel: 'info',
+    localOnly: Boolean(opts.upstream),
+    apiBaseUrl,
     pollIntervalMs: 0,
-    ...(opts.connectionId != null ? { connectionId: opts.connectionId } : {}),
-    ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
-    ...(opts.gatewayHost ? { gatewayHost: opts.gatewayHost } : {}),
-    ...(opts.gatewayPort != null ? { gatewayPort: opts.gatewayPort } : {}),
+    gatewayProtocol,
+    gatewayPort,
+    gatewayHost: opts.gatewayHost,
+    logLevel,
+    connectionId: opts.connectionId,
+    strict: true,
   });
 
+  if (opts.upstream) {
+    config.applyLocalUpstream({
+      protocol: opts.upstream.protocol,
+      host: opts.upstream.host,
+      port: opts.upstream.port,
+      username: opts.upstream.username ?? '',
+      password: opts.upstream.password ?? '',
+    });
+  }
+
+  const proxy = new ProxyServer(config, { logLevel: 'info' });
+
   let lastConnect: LastConnectSnapshot = { hostname: null, at: null };
-  client.setRequestObserver((hostname) => {
+  proxy.setRequestObserver((hostname) => {
     if (isLoopbackHostname(hostname)) return;
     lastConnect = { hostname, at: Date.now() };
-    if (attach.status !== 'verified') {
+    const expectAfter = attach.expectConnectAfter ?? null;
+    if (
+      attach.status !== 'verified' &&
+      expectAfter != null &&
+      lastConnect.at != null &&
+      lastConnect.at >= expectAfter
+    ) {
       attach = {
         status: 'verified',
         method: attach.method ?? 'flags',
-        verifiedAt: new Date().toISOString(),
-        extensionPath: null,
+        expectConnectAfter: expectAfter,
       };
       persist(true);
     }
   });
 
   const persist = (ready: boolean): void => {
-    const netState = client.getNetworkState();
+    const netState = networkState(config);
     const data: ProxyJson = {
       pid: process.pid,
       ready,
@@ -185,7 +221,11 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
   });
 
   try {
-    await client.start();
+    await config.init();
+    await proxy.start(opts.dataPort);
+    if (!opts.upstream && networkState(config).sessionId == null) {
+      await config.setConfig({ session_id: crypto.randomUUID().replace(/-/g, '') });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof PaymentRequiredError) {
@@ -200,10 +240,6 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     throw err;
   }
 
-  if (!opts.upstream && client.getNetworkState().sessionId == null) {
-    await client.updateSessionId(crypto.randomUUID().replace(/-/g, ''));
-  }
-
   let stopping = false;
   const shutdown = async (): Promise<void> => {
     if (stopping) return;
@@ -214,11 +250,11 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       // ignore
     }
     try {
-      await client.stop();
+      await proxy.stop();
     } catch {
       // ignore
     }
-    const netState = client.getNetworkState();
+    const netState = networkState(config);
     writeProxyJson({
       pid: null,
       ready: false,
@@ -237,7 +273,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
 
   const server = createControlServer({
     getStatus: () => {
-      const netState = client.getNetworkState();
+      const netState = networkState(config);
       return {
         pid: process.pid,
         proxyUrl,
@@ -252,41 +288,23 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       };
     },
     proxyOn: async () => {
-      await client.updateRules(['*']);
-      client.closeAllConnections();
+      await config.setConfig({ rules: ['*'] });
+      proxy.closeAllConnections();
       persist(true);
-      return { egress: 'aluvia' as const, rules: client.getNetworkState().rules };
+      return { egress: 'aluvia' as const, rules: networkState(config).rules };
     },
     proxyOff: async () => {
-      await client.updateRules([]);
-      client.closeAllConnections();
+      await config.setConfig({ rules: [] });
+      proxy.closeAllConnections();
       persist(true);
-      return { egress: 'direct' as const, rules: client.getNetworkState().rules };
-    },
-    route: async (host) => {
-      const rules = client.getNetworkState().rules;
-      if (!rules.includes(host)) {
-        await client.updateRules([...rules, host]);
-      }
-      client.closeConnectionsForHost(host);
-      persist(true);
-      return { rules: client.getNetworkState().rules };
-    },
-    unroute: async (host) => {
-      const rules = client.getNetworkState().rules;
-      const next = rules.filter((rule) => rule !== host);
-      if (next.length !== rules.length) {
-        await client.updateRules(next);
-      }
-      client.closeConnectionsForHost(host);
-      persist(true);
-      return { rules: client.getNetworkState().rules };
+      return { egress: 'direct' as const, rules: networkState(config).rules };
     },
     rotateIp: async () => {
       const sessionId = crypto.randomUUID().replace(/-/g, '');
-      await client.updateSessionId(sessionId);
+      await config.setConfig({ session_id: sessionId });
+      proxy.closeAllConnections();
       persist(true);
-      const netState = client.getNetworkState();
+      const netState = networkState(config);
       return {
         sessionId: netState.sessionId ?? sessionId,
         connectionId: netState.connectionId ?? opts.connectionId ?? 0,
@@ -294,12 +312,15 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     },
     setGeo: async (body) => {
       if (body.clear) {
-        await client.updateTargetGeo(null);
+        await config.setConfig({ target_geo: null });
       } else {
-        await client.updateTargetGeo(body.geo ?? null);
+        const raw = body.geo ?? null;
+        const trimmed = raw == null ? null : raw.trim();
+        await config.setConfig({ target_geo: trimmed && trimmed.length > 0 ? trimmed : null });
       }
+      proxy.closeAllConnections();
       persist(true);
-      const netState = client.getNetworkState();
+      const netState = networkState(config);
       return {
         targetGeo: netState.targetGeo,
         connectionId: netState.connectionId ?? opts.connectionId ?? 0,
@@ -322,7 +343,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     const onError = (err: NodeJS.ErrnoException) => {
       void (async () => {
         try {
-          await client.stop();
+          await proxy.stop();
         } catch {
           // ignore
         }

@@ -45,13 +45,12 @@ export function skillInstallDirs(): string[] {
   return [...new Set(dirs)];
 }
 
-export function installProxySkill(): { skillPaths: string[]; skill?: string; error?: string } {
+export function installProxySkill(): { skillPaths: string[]; error?: string } {
   const src = bundledSkillPath();
   if (!src) {
     return { skillPaths: [], error: 'bundled aluvia skill is missing from this CLI install' };
   }
   const body = fs.readFileSync(src);
-  const skill = body.toString('utf8');
   const skillPaths: string[] = [];
   for (const dir of skillInstallDirs()) {
     const destDir = path.join(dir, 'aluvia');
@@ -64,5 +63,5 @@ export function installProxySkill(): { skillPaths: string[]; skill?: string; err
       // skip unwritable agent dirs
     }
   }
-  return { skillPaths, skill };
+  return { skillPaths };
 }

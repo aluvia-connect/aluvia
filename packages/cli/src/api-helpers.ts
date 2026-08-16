@@ -1,13 +1,4 @@
-import {
-  AluviaApi,
-  PaymentRequiredError,
-  readLock,
-  listSessions,
-  isProcessAlive,
-  removeLock,
-  toLockData,
-} from '@aluvia/sdk';
-import type { LockData } from '@aluvia/sdk';
+import { AluviaApi } from './net/aluvia-api.js';
 import { output } from './cli.js';
 import {
   ensureInstallId,
@@ -54,76 +45,16 @@ export function requireApi(): AluviaApi {
       1,
     );
   }
+  const fromEnv = (process.env.ALUVIA_API_BASE_URL ?? '').trim();
+  const apiBaseUrl = fromEnv || undefined;
   if (cred.kind === 'token') {
-    return new AluviaApi({ apiKey: cred.apiKey });
+    return new AluviaApi({ apiKey: cred.apiKey, ...(apiBaseUrl ? { apiBaseUrl } : {}) });
   }
-  return new AluviaApi({ installId: cred.installId });
+  return new AluviaApi({ installId: cred.installId, ...(apiBaseUrl ? { apiBaseUrl } : {}) });
 }
 
-export function paymentRequiredOutput(err: unknown): Record<string, unknown> | null {
-  if (err instanceof PaymentRequiredError) {
-    return {
-      error: err.message,
-      code: 'payment_required',
-      claim_url: err.claimUrl,
-    };
-  }
-  return null;
-}
-
-export async function outputIfPaymentRequired(err: unknown): Promise<void> {
-  if (!(err instanceof PaymentRequiredError)) return;
-  const { paymentRequiredPayload } = await import('./auth.js');
-  output(await paymentRequiredPayload(err), 1);
-}
-
-export function resolveSession(sessionName?: string): {
-  session: string;
-  lock: LockData;
-} {
-  if (sessionName) {
-    const lock = readLock(sessionName);
-    if (!lock) {
-      return output({ error: `No session found with name '${sessionName}'.` }, 1);
-    }
-    if (!isProcessAlive(lock.pid)) {
-      removeLock(sessionName);
-      return output(
-        {
-          error: `Session '${sessionName}' is no longer running (stale lock cleaned up).`,
-        },
-        1,
-      );
-    }
-    return { session: sessionName, lock };
-  }
-
-  const sessions = listSessions();
-  if (sessions.length === 0) {
-    return output({ error: 'No running browser sessions found.' }, 1);
-  }
-  if (sessions.length > 1) {
-    return output(
-      {
-        error: 'Multiple sessions running. Specify --browser-session <name>.',
-        browserSessions: sessions.map((s) => s.session),
-      },
-      1,
-    );
-  }
-
-  const s = sessions[0];
-  return { session: s.session, lock: toLockData(s) };
-}
-
-export function requireConnectionId(lock: LockData, session: string): number {
-  if (lock.connectionId == null) {
-    return output(
-      {
-        error: `Session '${session}' has no connection ID. It may have been started without API access.`,
-      },
-      1,
-    );
-  }
-  return lock.connectionId;
+export function credentialNext(recycled: boolean): string {
+  return recycled
+    ? 'Reload the tab. Do not restart Chrome.'
+    : 'Saved. If Chrome is not aimed yet, run `aluvia setup --url <page>`.';
 }

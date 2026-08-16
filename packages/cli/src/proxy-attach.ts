@@ -1,52 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isLoopbackHostname } from '@aluvia/sdk';
+import { isLoopbackHostname } from './net/loopback.js';
 import { controlRequest } from './proxy-control-client.js';
-import type { AttachMethod } from './proxy-state.js';
-
-export type ArtifactWrite = {
-  wrote: boolean;
-  path: string;
-  mtimeMs: number;
-};
-
-export function writeAttachExtension(extDir: string, dataPort: number): void {
-  fs.mkdirSync(extDir, { recursive: true });
-  const manifest = {
-    manifest_version: 3,
-    name: 'Aluvia proxy',
-    version: '1.0.0',
-    permissions: ['proxy'],
-    background: { service_worker: 'background.js' },
-  };
-  fs.writeFileSync(path.join(extDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-  const background = `chrome.proxy.settings.set({
-  value: {
-    mode: 'fixed_servers',
-    rules: {
-      singleProxy: { scheme: 'http', host: '127.0.0.1', port: ${dataPort} },
-      bypassList: ['localhost', '127.0.0.1', '::1', '<local>'],
-    },
-  },
-  scope: 'regular',
-});
-`;
-  fs.writeFileSync(path.join(extDir, 'background.js'), background);
-}
-
-export function ensureAttachExtension(extDir: string, dataPort: number): ArtifactWrite {
-  const backgroundPath = path.join(extDir, 'background.js');
-  const needle = `port: ${dataPort}`;
-  if (fs.existsSync(backgroundPath)) {
-    const existing = fs.readFileSync(backgroundPath, 'utf8');
-    if (existing.includes(needle)) {
-      return { wrote: false, path: extDir, mtimeMs: fs.statSync(backgroundPath).mtimeMs };
-    }
-  }
-  writeAttachExtension(extDir, dataPort);
-  return { wrote: true, path: extDir, mtimeMs: fs.statSync(backgroundPath).mtimeMs };
-}
 
 export type PolicyWriteResult = {
   wrote: boolean;
@@ -144,28 +100,6 @@ export function writeChromeProxyPolicy(dataPort: number): PolicyWriteResult {
   return { wrote: false, path: null, mtimeMs: null };
 }
 
-export async function tryGsettings(dataPort: number): Promise<boolean> {
-  const commands: string[][] = [
-    ['set', 'org.gnome.system.proxy', 'mode', 'manual'],
-    ['set', 'org.gnome.system.proxy.http', 'host', '127.0.0.1'],
-    ['set', 'org.gnome.system.proxy.http', 'port', String(dataPort)],
-    ['set', 'org.gnome.system.proxy.https', 'host', '127.0.0.1'],
-    ['set', 'org.gnome.system.proxy.https', 'port', String(dataPort)],
-    ['set', 'org.gnome.system.proxy', 'ignore-hosts', "['localhost','127.0.0.1','::1']"],
-  ];
-  try {
-    for (const args of commands) {
-      const result = spawnSync('gsettings', args, { encoding: 'utf8' });
-      if (result.error || result.status !== 0) {
-        return false;
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Wait for a GUI CONNECT that happens at or after `sinceMs`.
  * Pre-existing CONNECTs (including `curl -x` before attach started) do not count.
@@ -187,25 +121,4 @@ export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs:
     if (remaining <= 0) return false;
     await new Promise((resolve) => setTimeout(resolve, Math.min(100, remaining)));
   }
-}
-
-export function pickAttachMethod(opts: {
-  policyPath: string | null;
-  gsettings: boolean;
-  hasExtension?: boolean;
-}): AttachMethod {
-  if (opts.policyPath) return 'policy';
-  if (opts.gsettings) return 'gsettings';
-  if (opts.hasExtension) return 'extension';
-  return 'policy';
-}
-
-/** One shell command the agent can exec. Node often cannot sudo; the Bot's shell can. */
-export function policyWriteCommand(dataPort: number): string {
-  const body = JSON.stringify(chromeProxyPolicyBody(dataPort), null, 2);
-  return [
-    "sudo -n mkdir -p /etc/opt/chrome/policies/managed && sudo -n tee /etc/opt/chrome/policies/managed/aluvia-proxy.json <<'EOF'",
-    body,
-    'EOF',
-  ].join('\n');
 }

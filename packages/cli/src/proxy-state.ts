@@ -5,8 +5,8 @@ import { configDir } from './config.js';
 export const DEFAULT_DATA_PORT = 18787;
 export const DEFAULT_CONTROL_PORT = 18788;
 
-export type AttachStatus = 'unverified' | 'verified' | 'needs_ui';
-export type AttachMethod = 'gsettings' | 'extension' | 'policy' | 'flags' | null;
+export type AttachStatus = 'needs_ui' | 'verified';
+export type AttachMethod = 'policy' | 'flags' | null;
 
 export type ProxyEgress = 'aluvia' | 'direct';
 
@@ -22,8 +22,8 @@ export type LastConnectSnapshot = {
 export type ProxyAttachState = {
   status: AttachStatus;
   method: AttachMethod;
-  verifiedAt: string | null;
-  extensionPath: string | null;
+  /** Only CONNECTs at or after this timestamp can mark attach verified. */
+  expectConnectAfter: number | null;
 };
 
 export type ProxyJson = {
@@ -43,13 +43,25 @@ export type ProxyJson = {
   claimUrl?: string | null;
 };
 
-export function defaultAttach(_home?: string): ProxyAttachState {
+export function defaultAttach(): ProxyAttachState {
   return {
-    status: 'unverified',
+    status: 'needs_ui',
     method: null,
-    verifiedAt: null,
-    extensionPath: null,
+    expectConnectAfter: null,
   };
+}
+
+export function normalizeAttach(raw: unknown): ProxyAttachState {
+  const base = defaultAttach();
+  if (!raw || typeof raw !== 'object') return base;
+  const value = raw as Record<string, unknown>;
+  const status: AttachStatus = value.status === 'verified' ? 'verified' : 'needs_ui';
+  const method: AttachMethod = value.method === 'policy' || value.method === 'flags' ? value.method : null;
+  const expectConnectAfter =
+    typeof value.expectConnectAfter === 'number' && Number.isFinite(value.expectConnectAfter)
+      ? value.expectConnectAfter
+      : null;
+  return { status, method, expectConnectAfter };
 }
 
 export function proxyJsonPath(): string {
@@ -60,7 +72,7 @@ export function readProxyJson(): ProxyJson | null {
   try {
     const parsed = JSON.parse(fs.readFileSync(proxyJsonPath(), 'utf8')) as ProxyJson;
     if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
+    return { ...parsed, attach: normalizeAttach(parsed.attach) };
   } catch {
     return null;
   }

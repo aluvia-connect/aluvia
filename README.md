@@ -1,613 +1,227 @@
-# Aluvia Node.js SDK
+# Aluvia
 
-[![npm](https://img.shields.io/npm/v/@aluvia/sdk.svg)](https://www.npmjs.com/package/@aluvia/sdk)
-[![downloads](https://img.shields.io/npm/dm/@aluvia/sdk.svg)](https://www.npmjs.com/package/@aluvia/sdk)
-[![license](https://img.shields.io/npm/l/@aluvia/sdk.svg)](./LICENSE)
-[![node](https://img.shields.io/node/v/@aluvia/sdk.svg)](./package.json)
+**Stop getting blocked.** Aluvia sends a computer-use agent's existing Chrome through residential and mobile carrier IPs — the same IPs real people use on their phones. Websites trust them, so the agent stops hitting 403s, CAPTCHAs, and “unusual traffic.” Any country by default; pin one with `--geo US` only when the site requires it.
 
-**Stop getting blocked.** Aluvia routes your AI agent's web traffic through premium US mobile carrier IPs — the same IPs used by real people on their phones. Websites trust them, so your agent stops hitting 403s, CAPTCHAs, and rate limits.
+The product is a local CLI. The human does not SSH into the VM or edit environment variables. They talk to the agent. The agent runs `aluvia`.
 
-## Packages
+```
+Chrome  ──aim──▶  127.0.0.1:18787  ──egress──▶  Aluvia mobile IP
+   ▲                     │                         or
+   │                     │                      this VM's
+   │                     ▼                      datacenter IP
+one restart         proxyd (18788)
+if needed
+```
 
-This repository is organized as a monorepo with three packages:
+**Aim** and **egress** are separate. Aim is “is Chrome talking to the local proxy?” Egress is “does that proxy send traffic through Aluvia, or straight out of the VM?” `proxy-on` / `proxy-off` flip egress. They do not restart Chrome.
 
-- **[@aluvia/sdk](./packages/sdk)** — Core SDK with `AluviaClient`, `AluviaApi`, framework adapters, and block detection
-- **[aluvia-cli](./packages/cli)** — Command-line tools for browser automation and session management
-- **[@aluvia/mcp](./packages/mcp)** — Model Context Protocol server for AI agent integration
-
-## Features
-
-- **CLI for browser automation** — launch headless Chromium sessions from the command line, with JSON output designed for AI agent frameworks
-- **Automatic block detection and unblocking** — the SDK detects 403s, WAF challenges, and CAPTCHAs, then reroutes through Aluvia and reloads the page automatically
-- **Smart routing** — proxy only the sites that block you; everything else goes direct to save cost and latency
-- **Runtime rule updates** — add hostnames to proxy rules on the fly, no restarts or redeployments
-- **Adapters for every tool** — Playwright, Puppeteer, Selenium, Axios, got, and Node's fetch
-- **IP rotation and geo targeting** — rotate IPs or target specific US regions at runtime
-- **REST API wrapper** — manage connections, check usage, and build custom tooling with `AluviaApi`
-
-Computer-use VMs can run a local unauthenticated proxy (`aluvia proxy`) in front of the GUI browser that is already on the machine. Route only the hostnames that block you; signed-in tabs stay on the datacenter IP. Agent skill: [skills/aluvia/SKILL.md](./skills/aluvia/SKILL.md). `aluvia setup` installs that skill into `~/.agents/skills`.
+Local proxy: `http://127.0.0.1:18787`. Control: `http://127.0.0.1:18788`. Every command prints JSON on stdout. Read `next`. Never print API keys.
 
 ---
 
-## Table of contents
+## Install
 
-- [Quick start](#quick-start)
-- [CLI reference](#cli-reference)
-- [Connecting to a running browser](#connecting-to-a-running-browser)
-- [Programmatic usage (AluviaClient)](#programmatic-usage)
-- [Routing rules](#routing-rules)
-- [Block detection and auto-unblocking](#block-detection-and-auto-unblocking)
-- [Tool integration adapters](#tool-integration-adapters)
-- [REST API (AluviaApi)](#rest-api)
-- [Architecture](#architecture)
+Node.js 18+. If `aluvia` is not on PATH, prefix every command with `npx aluvia-cli`.
+
+```bash
+npx aluvia-cli setup --url https://www.example.com/checkout
+```
+
+That starts the daemon, aims Chrome at `127.0.0.1:18787`, and installs the [agent skill](./skills/aluvia/SKILL.md) into `~/.agents/skills` (and other agent skill dirs if they exist).
+
+A first setup starts a free trial. No API key.
 
 ---
 
-## Quick start
+## First setup
 
-### 1. Get Aluvia API key
-
-[Aluvia dashboard](https://dashboard.aluvia.io/?utm_source=npmjs.com&utm_medium=referral)
-
-### 2. Install
-
-For programmatic use:
-```bash
-npm install @aluvia/sdk playwright
-export ALUVIA_API_KEY="your-api-key"
-```
-
-For CLI use:
-```bash
-npm install -g aluvia-cli
-export ALUVIA_API_KEY="your-api-key"
-```
-
-For MCP integration:
-```bash
-npm install @aluvia/mcp
-```
-
-### 3. Run
-
-Aluvia automatically detects website blocks and uses mobile IPs when necessary.
+Copy the blocked page's address-bar URL, then:
 
 ```bash
-aluvia session start https://example.com --auto-unblock --run your-script.js
+aluvia setup --url https://www.example.com/checkout
 ```
+
+Read the JSON. **`next` is the next action.**
+
+| Field | Meaning |
+| --- | --- |
+| `ready: true` | Chrome is aimed and the daemon is up. Reload the blocked tab. Do not run setup again. |
+| `needsChromeRestart: true` | Quit **this** Chrome. Run `chromeCommand` exactly. Open or reload the blocked URL. Do not run setup again. The daemon marks `aimed` when Chrome CONNECTs. |
+| `code: "payment_required"` | Trial data is used up. Show the human `claim_url`, then run `aluvia auth login`. |
+
+If the page is still blocked after Chrome is aimed: `aluvia status`. If `aimed` is false, the platform replaced Chrome — run `setup --url <page>` and `chromeCommand` once more.
 
 ---
 
-## Skills
+## Day to day
 
-- Claude code skill
-- OpenClaw skill
+| Goal | Command |
+| --- | --- |
+| Use Aluvia (all tabs through a mobile IP) | `aluvia proxy-on` then reload. Any country. `--geo US` only if the site requires it. |
+| Back to the VM datacenter IP | `aluvia proxy-off` then reload. Do not quit Chrome. |
+| New exit IP | `aluvia rotate-ip` then reload. Any country. `--geo US` only if required. |
+| Check | `aluvia status` — follow `next`. `what` explains every field. |
+| Stop the daemon | `aluvia stop` — Chrome aimed at 18787 will break. Prefer `proxy-off`. |
+
+`proxy-on` and `proxy-off` do not restart Chrome.
 
 ---
 
-## CLI reference
+## Trial, paid, and your own proxy
 
-The CLI outputs JSON for easy integration with AI agent frameworks. All commands are available via the `aluvia` binary. Run `aluvia help --json` for machine-readable help.
+Credentials resolve in this order: a proxy URL the human pasted, then an Aluvia API key, then a 64-hex install id (the trial).
 
-### `session start` — Launch a browser session
+The human cannot edit this VM. Ask them in chat. Then **you** run the command. Never set env vars. Never print the key.
 
-```bash
-aluvia session start <url> [options]
-```
+| They give you | You run |
+| --- | --- |
+| An Aluvia API key | `aluvia auth <that key>` |
+| Their own proxy URL | `aluvia proxy-provider <url>` |
+| They want Aluvia again after a BYO proxy | `aluvia proxy-provider aluvia` |
 
-| Option                      | Description                                                              |
-| --------------------------- | ------------------------------------------------------------------------ |
-| `--auto-unblock`            | Auto-detect blocks and reload through Aluvia                             |
-| `--run <script>`            | Run a script with `page`, `browser`, `context` injected; exits when done |
-| `--headful`                 | Show the browser window (default: headless)                              |
-| `--browser-session <name>`  | Name this session (auto-generated if omitted, e.g. `swift-falcon`)       |
-| `--connection-id <id>`      | Reuse an existing Aluvia connection                                      |
-| `--disable-block-detection` | Disable block detection entirely                                         |
+### When the trial is used up
 
-**Examples:**
-
-```bash
-# Launch with auto-unblocking
-aluvia session start https://example.com --auto-unblock
-
-# Run a script inline
-aluvia session start https://example.com --auto-unblock --run scrape.mjs
-
-# Debug with a visible browser window
-aluvia session start https://example.com --headful
-
-# Reuse an existing connection
-aluvia session start https://example.com --connection-id 3449
-```
-
-### `session close` — Stop a session
-
-```bash
-aluvia session close                              # auto-selects if only one is running
-aluvia session close --browser-session swift-falcon  # close by name
-aluvia session close --all                          # close all sessions
-```
-
-### `session list` — List active sessions
-
-```bash
-aluvia session list
-```
+A command that needs the Aluvia network returns:
 
 ```json
 {
-  "sessions": [
-    {
-      "browserSession": "swift-falcon",
-      "pid": 12345,
-      "startUrl": "https://example.com",
-      "cdpUrl": "http://127.0.0.1:38209",
-      "connectionId": 3449,
-      "blockDetection": true,
-      "autoUnblock": true
-    }
-  ],
-  "count": 1
+  "code": "payment_required",
+  "claim_url": "https://dashboard.aluvia.io/cli-auth?cli_code=ABCD",
+  "next": "Show claim_url to the human. Then run `aluvia auth login` to wait until they finish. When that succeeds, retry."
 }
 ```
 
-### `session get` — Full session details
+1. Show the human `claim_url`. They open it on **their** machine (not the VM).
+2. They enter email, type the 6-digit code from the email (same tab), Authorize, then Buy data if asked.
+3. You run `aluvia auth login` to wait. Do not show a second URL — login reuses the pending session.
+4. When login succeeds, `aluvia proxy-on` and reload the tab.
+
+`aluvia auth login` is the wait. It is not how you start a first trial.
+
+### Auth status
 
 ```bash
-aluvia session get [--browser-session <name>]
+aluvia auth status
 ```
 
-Returns session info enriched with block detection history and the full connection object from the API.
-
-### `session rotate-ip` — Get a new IP
-
-```bash
-aluvia session rotate-ip [--browser-session <name>]
+```json
+{ "authenticated": false, "provider": "aluvia", "trial": true }
 ```
 
-### `session set-geo` — Target a specific country
-
-```bash
-aluvia session set-geo US                          # target United States
-aluvia session set-geo GB                          # target United Kingdom
-aluvia session set-geo --clear                     # clear country targeting
+```json
+{ "authenticated": true, "source": "config", "provider": "aluvia", "configFile": "~/.aluvia/config.json" }
 ```
 
-### `session set-rules` — Update routing rules
-
-```bash
-aluvia session set-rules "example.com,api.example.com"    # add rules
-aluvia session set-rules --remove "example.com"           # remove rules
+```json
+{ "authenticated": false, "provider": "custom" }
 ```
 
-Rules are comma-separated. By default rules are appended; use `--remove` to remove specific rules.
-
-### Account and other commands
-
-```bash
-aluvia account                # account info
-aluvia account usage          # usage stats
-aluvia account usage --start 2025-01-01T00:00:00Z --end 2025-02-01T00:00:00Z
-
-aluvia geos                   # list available geo-targeting options
-aluvia help                   # plain text help
-aluvia help --json            # machine-readable help
-```
+The status payload never includes the key.
 
 ---
 
-## Connecting to a running browser
+## Commands
 
-There are two ways to run code against a browser session started by the CLI.
+```
+aluvia setup --url <page>          Start proxyd and aim the GUI browser
+aluvia start                       Start the local egress daemon
+aluvia stop                        Stop the local egress daemon
+aluvia status                      Show daemon status
+aluvia proxy-on [--geo <geo>]      All browser traffic through Aluvia (any geo unless --geo)
+aluvia proxy-off                   Browser traffic direct (daemon stays up)
+aluvia rotate-ip [--geo <geo>]     New exit IP from any geo (or --geo US)
+aluvia proxy-provider aluvia       Use the Aluvia network (default)
+aluvia proxy-provider <url>        Use a proxy URL the human pasted
 
-### Option A: `--run` (simplest)
+aluvia account                     Account info
+aluvia account usage [--start --end]
+aluvia geos                        List available geos
 
-Pass a script to `session start`. The globals `page`, `browser`, and `context` are available — no imports needed:
+aluvia auth <key>                  Save an API key the human pasted
+aluvia auth login                  Wait until the human finishes claim_url
+aluvia auth status                 Whether you are authenticated
+aluvia help [--json]               This list (JSON with --json)
+```
+
+`--geo` takes a country code such as `US`. Omit it to use every geo. There is no `--geo all` or `--geo any`.
+
+`aluvia help --json` is the machine-readable command list.
+
+### Status fields
+
+`aluvia status` (and a successful `setup`) include:
+
+| Field | Meaning |
+| --- | --- |
+| `next` | The next action. Follow it. |
+| `aimed` | Is Chrome sending traffic to `http://127.0.0.1:18787`? |
+| `egress` | `aluvia` = mobile/residential IP. `direct` = this VM datacenter IP. |
+| `ready` | Aimed and the daemon is up. Reload the tab. |
+| `healthy` | The local proxy process is accepting connections. |
+| `needsChromeRestart` | `true` means quit Chrome and run `chromeCommand`. After that it stays false. |
+| `rules` | `["*"]` = all hosts through Aluvia. `[]` = all hosts direct. |
+| `targetGeo` | Pinned country code, or `null` for all geos. |
+| `what` | One-line explanation of each of the fields above. |
+
+---
+
+## How the local proxy works
+
+```
+┌─────────────────┐     ┌──────────────────────────┐     ┌─────────────────────┐
+│                 │     │                          │     │                     │
+│  GUI Chrome     │────▶│  proxyd                  │────▶│  gateway.aluvia.io  │
+│  (already on    │     │  127.0.0.1:18787         │     │  (mobile IPs)       │
+│   the machine)  │     │                          │     │                     │
+└─────────────────┘     │  egress = aluvia  ──────────────────┘
+                        │  egress = direct  ──────────▶ VM datacenter
+                        └──────────────────────────┘
+```
+
+Chrome always talks to the loopback proxy once it is aimed. The daemon decides per-request whether to send that traffic through Aluvia (or a BYO proxy) or out of the VM directly.
+
+State lives under `ALUVIA_HOME`: `/workspace/.aluvia` when `/workspace` exists, otherwise `~/.aluvia`. That directory holds `config.json`, `install_id`, `proxy.json`, and logs.
+
+Optional overrides (not the agent path — agents run `aluvia auth` / `aluvia proxy-provider`):
+
+| Variable | Role |
+| --- | --- |
+| `ALUVIA_API_KEY` | API key override |
+| `ALUVIA_UPSTREAM` | BYO proxy URL override |
+| `ALUVIA_HOME` | Config directory |
+
+Do not point a BYO URL at the local daemon — that loops.
+
+---
+
+## Agent skill
+
+[`skills/aluvia/SKILL.md`](./skills/aluvia/SKILL.md) is the instruction file computer-use agents follow. `aluvia setup` copies it into the agent skill dirs on the machine.
+
+Use Aluvia when a GUI workflow hits Cloudflare, Access Denied, CAPTCHA, unusual traffic, or a hard 403 on a page that should load — not a normal login wall.
+
+Do not guess hostnames, write PAC/nftables, load an unpacked extension, or use `chrome://settings/system`. Do not `stop` to turn the proxy off.
+
+---
+
+## This repository
+
+A private workspace. The CLI is the product. Internals live in `packages/cli/src/net`.
+
+| Package | Role |
+| --- | --- |
+| [`packages/cli`](./packages/cli) | `aluvia` / `aluvia-cli` — daemon, setup, auth, skill |
 
 ```bash
-aluvia session start https://example.com --auto-unblock --run script.mjs
+npm ci
+npm run build
+npm test
+npm run lint
 ```
 
-```js
-// script.mjs
-console.log("URL:", page.url());
-
-const newPage = await context.newPage();
-await newPage.goto("https://another-site.com");
-console.log("Other site title:", await newPage.title());
-```
-
-The session starts, runs your script, and exits.
-
-### Option B: `connect()` (for AI agents and long-running processes)
-
-Start a session as a background daemon, then connect from your application:
-
-```bash
-aluvia session start https://example.com --auto-unblock
-```
-
-```ts
-import { connect } from "@aluvia/sdk";
-
-// Auto-discovers the running session
-const { page, browser, context, disconnect } = await connect();
-console.log("URL:", page.url());
-
-// When running multiple sessions, specify by name
-const conn = await connect("swift-falcon");
-console.log("URL:", conn.page.url());
-
-// Disconnect when done (the session keeps running)
-await disconnect();
-```
-
-Use this when your agent generates automation code dynamically at runtime or needs a persistent browser across multiple operations.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) and [Claude.md](./Claude.md).
 
 ---
-
-## Programmatic usage
-
-For full control, use `AluviaClient` directly instead of the CLI.
-
-### Basic example
-
-```ts
-import { AluviaClient } from "@aluvia/sdk";
-import { chromium } from "playwright";
-
-const client = new AluviaClient({
-  apiKey: process.env.ALUVIA_API_KEY!,
-});
-
-const connection = await client.start();
-const browser = await chromium.launch({ proxy: connection.asPlaywright() });
-const page = await browser.newPage();
-await page.goto("https://example.com");
-
-// ... do your work ...
-
-await browser.close();
-await connection.close();
-```
-
-### With auto-launched browser
-
-```ts
-const client = new AluviaClient({
-  apiKey: process.env.ALUVIA_API_KEY!,
-  startPlaywright: true,
-  blockDetection: {
-    enabled: true,
-    autoUnblock: true,
-  },
-});
-
-const connection = await client.start();
-const page = await connection.browser.newPage();
-await page.goto("https://example.com"); // auto-reloads through Aluvia if blocked
-
-await connection.close(); // stops proxy, closes browser, releases resources
-```
-
-### Runtime updates
-
-While your agent is running, update routing, rotate IPs, or change geo — no restarts needed:
-
-```ts
-await client.updateRules(["blocked-site.com"]); // proxy this hostname
-await client.updateSessionId("new-session-id"); // rotate to a new IP
-await client.updateTargetGeo("us"); // target United States IPs
-```
-
-### Constructor options
-
-```ts
-new AluviaClient({
-  apiKey: string;                        // Required
-  connectionId?: number;                 // Reuse an existing connection
-  startPlaywright?: boolean;             // Auto-launch Chromium browser
-  headless?: boolean;                    // Default: true (only with startPlaywright)
-  blockDetection?: BlockDetectionConfig; // See "Block detection" section
-  localPort?: number;                    // Local proxy port (auto-assigned if omitted)
-  gatewayProtocol?: "http" | "https";    // Default: "http"
-  gatewayPort?: number;                  // Default: 8080 (http) or 8443 (https)
-  pollIntervalMs?: number;               // Config poll interval (default: 5000ms)
-  timeoutMs?: number;                    // API request timeout
-  logLevel?: "silent" | "info" | "debug";
-  strict?: boolean;                      // Throw if config fails to load (default: true)
-  apiBaseUrl?: string;                   // Default: "https://api.aluvia.io/v1"
-});
-```
-
-For all options in detail, see the [Client Technical Guide](docs/client-technical-guide.md#constructor-options).
-
----
-
-## Routing rules
-
-The local proxy routes each request based on hostname rules. Only hostnames matching a rule go through Aluvia; everything else goes direct.
-
-### Why this matters
-
-- **Save money** — proxy only the sites that block you
-- **Lower latency** — non-blocked sites skip the proxy entirely
-- **Adapt on the fly** — rules update at runtime, no restarts needed
-
-### Rule patterns
-
-| Pattern         | Matches                        |
-| --------------- | ------------------------------ |
-| `*`             | All hostnames                  |
-| `example.com`   | Exact match                    |
-| `*.example.com` | Subdomains of example.com      |
-| `google.*`      | google.com, google.co.uk, etc. |
-| `-example.com`  | Exclude from proxying          |
-
-### Examples
-
-```ts
-// Proxy all traffic
-await client.updateRules(["*"]);
-
-// Proxy specific hosts only
-await client.updateRules(["target-site.com", "*.google.com"]);
-
-// Proxy everything except Stripe
-await client.updateRules(["*", "-api.stripe.com"]);
-
-// Route all traffic direct (no proxy)
-await client.updateRules([]);
-```
-
-Or from the CLI:
-
-```bash
-aluvia session set-rules "target-site.com,*.google.com"
-aluvia session set-rules --remove "target-site.com"
-```
-
----
-
-## Block detection and auto-unblocking
-
-Most proxy solutions require you to decide upfront which sites to proxy. If a site blocks you later, you're stuck.
-
-Aluvia detects blocks automatically and can unblock your agent on the fly. The SDK analyzes every page load using a weighted scoring system across multiple signals — HTTP status codes, WAF headers, CAPTCHA selectors, page content, redirect chains, and more.
-
-### Automatic unblocking (recommended)
-
-When a block is detected, the SDK adds the hostname to proxy rules and reloads the page through Aluvia:
-
-```ts
-const client = new AluviaClient({
-  apiKey: process.env.ALUVIA_API_KEY!,
-  startPlaywright: true,
-  blockDetection: {
-    enabled: true,
-    autoUnblock: true,
-    onDetection: (result, page) => {
-      console.log(
-        `${result.blockStatus} on ${result.hostname} (score: ${result.score})`,
-      );
-    },
-  },
-});
-```
-
-Or from the CLI:
-
-```bash
-aluvia session start https://example.com --auto-unblock
-```
-
-### Detection-only mode
-
-Run detection without automatic remediation. Your agent inspects the results and decides what to do:
-
-```ts
-blockDetection: {
-  enabled: true,
-  onDetection: (result, page) => {
-    if (result.blockStatus === "blocked") {
-      // Agent decides: retry, rotate IP, update rules, etc.
-    }
-  },
-}
-```
-
-### Block status scores
-
-Each page analysis produces a score from 0.0 to 1.0:
-
-| Score  | Status        | Meaning                                                         |
-| ------ | ------------- | --------------------------------------------------------------- |
-| >= 0.7 | `"blocked"`   | High confidence block. Auto-reloads when `autoUnblock: true`.   |
-| >= 0.4 | `"suspected"` | Possible block. Reloads only if `autoUnblockOnSuspected: true`. |
-| < 0.4  | `"clear"`     | No block detected.                                              |
-
-Scores use probabilistic combination (`1 - product(1 - weight)`) so weak signals don't stack into false positives.
-
-### How detection works
-
-Detection runs in two passes:
-
-1. **Fast pass** (at `domcontentloaded`) — checks HTTP status codes and WAF response headers. High-confidence blocks (score >= 0.9) trigger immediate remediation.
-2. **Full pass** (after `networkidle`) — analyzes page title, visible text, challenge selectors, meta refreshes, and redirect chains.
-
-The SDK also detects SPA navigations and tracks persistent blocks per hostname to prevent infinite retry loops.
-
-### Detection config options
-
-```ts
-blockDetection: {
-  enabled?: boolean;                 // Default: true
-  autoUnblock?: boolean;             // Auto-remediate blocked pages
-  autoUnblockOnSuspected?: boolean;  // Also remediate "suspected" pages
-  challengeSelectors?: string[];     // Custom CSS selectors for challenge detection
-  extraKeywords?: string[];          // Additional keywords for text analysis
-  extraStatusCodes?: number[];       // Additional HTTP status codes to flag
-  networkIdleTimeoutMs?: number;     // Default: 3000ms
-  onDetection?: (result, page) => void | Promise<void>;
-}
-```
-
-### Manual detection
-
-You can also check responses yourself and update rules on the fly:
-
-```ts
-const response = await page.goto(url);
-
-if (response?.status() === 403) {
-  await client.updateRules([...currentRules, new URL(url).hostname]);
-  await page.goto(url); // retried through Aluvia
-}
-```
-
-For the full list of signal detectors and weights, see the [Client Technical Guide](docs/client-technical-guide.md#signal-detectors).
-
----
-
-## Tool integration adapters
-
-The SDK handles proxy configuration for every major tool:
-
-| Tool         | Method                       | Returns                                               |
-| ------------ | ---------------------------- | ----------------------------------------------------- |
-| Playwright   | `connection.asPlaywright()`  | `{ server, username?, password? }`                    |
-| Playwright   | `connection.browser`         | Auto-launched Chromium (with `startPlaywright: true`) |
-| Playwright   | `connection.cdpUrl`          | CDP endpoint for `connectOverCDP()`                   |
-| Puppeteer    | `connection.asPuppeteer()`   | `['--proxy-server=...']`                              |
-| Selenium     | `connection.asSelenium()`    | `'--proxy-server=...'`                                |
-| Axios        | `connection.asAxiosConfig()` | `{ proxy: false, httpAgent, httpsAgent }`             |
-| got          | `connection.asGotOptions()`  | `{ agent: { http, https } }`                          |
-| fetch        | `connection.asUndiciFetch()` | Proxy-enabled `fetch` function                        |
-| Node.js http | `connection.asNodeAgents()`  | `{ http: Agent, https: Agent }`                       |
-
-### Examples
-
-```ts
-// Playwright
-const browser = await chromium.launch({ proxy: connection.asPlaywright() });
-
-// Puppeteer
-const browser = await puppeteer.launch({ args: connection.asPuppeteer() });
-
-// Axios
-const axiosClient = axios.create(connection.asAxiosConfig());
-await axiosClient.get("https://example.com");
-
-// got
-const gotClient = got.extend(connection.asGotOptions());
-await gotClient("https://example.com");
-
-// Node's fetch (via undici)
-const myFetch = connection.asUndiciFetch();
-await myFetch("https://example.com");
-```
-
-For more details, see the [Client Technical Guide](docs/client-technical-guide.md#tool-adapters).
-
----
-
-## REST API
-
-`AluviaApi` is a typed wrapper for the Aluvia REST API. Use it to manage connections, check account info, or build custom tooling — without starting a proxy.
-
-### Endpoints
-
-| Method                                    | Description                             |
-| ----------------------------------------- | --------------------------------------- |
-| `api.account.get()`                       | Get account info (balance, usage)       |
-| `api.account.connections.list()`          | List all connections                    |
-| `api.account.connections.create(body)`    | Create a new connection                 |
-| `api.account.connections.get(id)`         | Get connection details                  |
-| `api.account.connections.patch(id, body)` | Update connection (rules, geo, session) |
-| `api.account.connections.delete(id)`      | Delete a connection                     |
-| `api.account.usage.get(params?)`          | Get usage stats                         |
-| `api.geos.list()`                         | List available geo-targeting options    |
-
-### Example
-
-```ts
-import { AluviaApi } from "@aluvia/sdk";
-
-const api = new AluviaApi({ apiKey: process.env.ALUVIA_API_KEY! });
-
-// Check account balance
-const account = await api.account.get();
-console.log("Balance:", account.balance_gb, "GB");
-
-// Create a connection for a new agent
-const conn = await api.account.connections.create({
-  description: "pricing-scraper",
-  rules: ["competitor-site.com"],
-  target_geo: "us",
-});
-console.log("Created connection:", conn.connection_id);
-
-// List available geos
-const geos = await api.geos.list();
-console.log(
-  "Geos:",
-  geos.map((g) => g.code),
-);
-```
-
-`AluviaApi` is also available as `client.api` when using `AluviaClient`.
-
-For the complete API reference, see the [API Technical Guide](docs/api-technical-guide.md).
-
----
-
-## Architecture
-
-The client is split into two independent planes:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        AluviaClient                             │
-├─────────────────────────────┬───────────────────────────────────┤
-│       Control Plane         │          Data Plane               │
-│       (ConfigManager)       │          (ProxyServer)            │
-├─────────────────────────────┼───────────────────────────────────┤
-│ • Fetches/creates config    │ • Local HTTP proxy (proxy-chain)  │
-│ • Polls for updates (ETag)  │ • Per-request routing decisions   │
-│ • PATCH updates (rules,     │ • Uses rules engine to decide:    │
-│   session, geo)             │   direct vs gateway               │
-└─────────────────────────────┴───────────────────────────────────┘
-```
-
-**Control Plane (ConfigManager)** — communicates with the Aluvia REST API to fetch proxy credentials and routing rules, polls for configuration updates using ETags, and pushes updates (rules, session ID, geo).
-
-**Data Plane (ProxyServer)** — runs a local HTTP proxy on `127.0.0.1` that reads the latest config per-request, so rule updates take effect immediately without restarts.
-
-```
-┌──────────────────┐      ┌──────────────────────────┐      ┌──────────────────────┐
-│                  │      │                          │      │                      │
-│    Your Agent    │─────▶│     Aluvia Client        │─────▶│  gateway.aluvia.io   │
-│                  │      │     127.0.0.1:port       │      │    (Mobile IPs)      │
-│                  │      │                          │      │                      │
-└──────────────────┘      │  Per-request routing:    │      └──────────────────────┘
-                          │                          │
-                          │  not-blocked.com ──────────────▶ Direct
-                          │  blocked-site.com ─────────────▶ Via Aluvia
-                          │                          │
-                          └──────────────────────────┘
-```
-
----
-
-## Learn more
-
-- [What is Aluvia?](https://docs.aluvia.io/)
-- [Understanding connections](https://docs.aluvia.io/fundamentals/connections)
-- [Playwright integration guide](https://docs.aluvia.io/integrations/integration-playwright)
-- [Puppeteer](https://docs.aluvia.io/integrations/integration-puppeteer), [Selenium](https://docs.aluvia.io/integrations/integration-selenium), [Axios](https://docs.aluvia.io/integrations/integration-axios), [got](https://docs.aluvia.io/integrations/integration-got), [fetch](https://docs.aluvia.io/integrations/integration-fetch)
-- [CLI Technical Guide](docs/cli-technical-guide.md)
-- [Client Technical Guide](docs/client-technical-guide.md)
-- [API Technical Guide](docs/api-technical-guide.md)
 
 ## License
 

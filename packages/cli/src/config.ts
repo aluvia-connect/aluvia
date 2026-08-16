@@ -29,6 +29,8 @@ export interface AluviaConfig {
   upstream?: string;
   source?: string;
   cliAuth?: PendingCliAuth;
+  /** When true, ignore ALUVIA_UPSTREAM and a stored BYO URL. */
+  preferAluvia?: boolean;
 }
 
 export type ParsedUpstream = {
@@ -154,9 +156,12 @@ function persistInstallId(installId: string): void {
 }
 
 export function saveApiKey(apiKey: string): void {
+  delete process.env.ALUVIA_UPSTREAM;
   const config = readConfig();
   config.apiKey = apiKey.trim();
   config.source = 'auth';
+  config.preferAluvia = true;
+  delete config.upstream;
   writeConfig(config);
 }
 
@@ -199,9 +204,11 @@ export function clearPendingCliAuth(): void {
 }
 
 export function getStoredUpstream(): string | undefined {
+  const config = readConfig();
+  if (config.preferAluvia) return undefined;
   const fromEnv = (process.env.ALUVIA_UPSTREAM ?? '').trim();
   if (fromEnv) return fromEnv;
-  const fromFile = (readConfig().upstream ?? '').trim();
+  const fromFile = (config.upstream ?? '').trim();
   return fromFile || undefined;
 }
 
@@ -209,16 +216,21 @@ export function saveUpstream(upstream: string): ParsedUpstream {
   const parsed = parseUpstreamUrl(upstream);
   const config = readConfig();
   config.upstream = parsed.href;
+  config.preferAluvia = false;
   writeConfig(config);
   return parsed;
 }
 
 export function clearUpstream(): boolean {
+  const envWas = Boolean((process.env.ALUVIA_UPSTREAM ?? '').trim());
+  delete process.env.ALUVIA_UPSTREAM;
   const config = readConfig();
-  if (!config.upstream) return false;
+  const fileWas = Boolean(config.upstream);
+  const alreadyPreferred = config.preferAluvia === true && !fileWas;
   delete config.upstream;
+  config.preferAluvia = true;
   writeConfig(config);
-  return true;
+  return envWas || fileWas || !alreadyPreferred;
 }
 
 export function parseUpstreamUrl(raw: string): ParsedUpstream {

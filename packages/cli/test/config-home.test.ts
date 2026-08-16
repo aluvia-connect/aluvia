@@ -108,6 +108,10 @@ describe('configDir ALUVIA_HOME', () => {
     assert.strictEqual(getStoredUpstream(), undefined);
     assert.throws(() => parseUpstreamUrl('ftp://x'), /Invalid upstream/);
     process.env.ALUVIA_UPSTREAM = 'http://env-proxy.example:9000';
+    assert.strictEqual(getStoredUpstream(), undefined);
+    delete process.env.ALUVIA_UPSTREAM;
+    fs.rmSync(path.join(home, 'config.json'), { force: true });
+    process.env.ALUVIA_UPSTREAM = 'http://env-proxy.example:9000';
     assert.match(getStoredUpstream() ?? '', /env-proxy\.example/);
     delete process.env.ALUVIA_UPSTREAM;
     fs.rmSync(home, { recursive: true, force: true });

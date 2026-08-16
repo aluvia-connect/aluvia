@@ -1,7 +1,8 @@
 import { describe, test, afterEach } from 'node:test';
 import assert from 'node:assert';
 import type { Server } from 'node:http';
-import { createControlServer, ControlError } from '../src/proxy-control-server.js';
+import { PaymentRequiredError } from '../src/net/errors.js';
+import { createControlServer, type ControlHandlers } from '../src/proxy-control-server.js';
 import { defaultAttach } from '../src/proxy-state.js';
 
 async function listen(server: Server): Promise<number> {
@@ -14,6 +15,18 @@ async function listen(server: Server): Promise<number> {
   });
 }
 
+function unusedHandlers(overrides: Partial<ControlHandlers> = {}): ControlHandlers {
+  return {
+    getStatus: () => {
+      throw new Error('unused');
+    },
+    rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
+    setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
+    stop: () => {},
+    ...overrides,
+  };
+}
+
 describe('control server', () => {
   let server: Server | undefined;
 
@@ -23,70 +36,20 @@ describe('control server', () => {
     server = undefined;
   });
 
-  test('POST /route of * is 400 and POST of a host is 200 after the handler resolves', async () => {
-    let routed: string | null = null;
-    server = createControlServer({
-      getStatus: () => ({
-        pid: 1,
-        proxyUrl: 'http://127.0.0.1:18787',
-        controlUrl: 'http://127.0.0.1:18788',
-        connectionId: 1,
-        sessionId: 'x',
-        targetGeo: null,
-        rules: routed ? [routed] : [],
-        count: routed ? 1 : 0,
-        attach: defaultAttach('/tmp'),
-      }),
-      route: async (host) => {
-        if (host === '*') throw new ControlError(400, 'catch-all * is not allowed');
-        routed = host;
-        return { rules: [host] };
-      },
-      unroute: async () => ({ rules: [] }),
-      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
-      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
-      stop: () => {},
-    });
-    const port = await listen(server);
-
-    const bad = await fetch(`http://127.0.0.1:${port}/route`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ host: '*' }),
-    });
-    assert.strictEqual(bad.status, 400);
-    assert.deepStrictEqual(await bad.json(), { error: 'catch-all * is not allowed' });
-
-    const ok = await fetch(`http://127.0.0.1:${port}/route`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ host: 'example.com' }),
-    });
-    assert.strictEqual(ok.status, 200);
-    assert.deepStrictEqual(await ok.json(), { rules: ['example.com'] });
-    assert.strictEqual(routed, 'example.com');
-  });
-
   test('POST /proxy-on and /proxy-off call handlers', async () => {
     let egress: 'aluvia' | 'direct' = 'direct';
-    server = createControlServer({
-      getStatus: () => {
-        throw new Error('unused');
-      },
-      route: async () => ({ rules: [] }),
-      unroute: async () => ({ rules: [] }),
-      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
-      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
-      proxyOn: async () => {
-        egress = 'aluvia';
-        return { egress, rules: ['*'] };
-      },
-      proxyOff: async () => {
-        egress = 'direct';
-        return { egress, rules: [] };
-      },
-      stop: () => {},
-    });
+    server = createControlServer(
+      unusedHandlers({
+        proxyOn: async () => {
+          egress = 'aluvia';
+          return { egress, rules: ['*'] };
+        },
+        proxyOff: async () => {
+          egress = 'direct';
+          return { egress, rules: [] };
+        },
+      }),
+    );
     const port = await listen(server);
 
     const on = await fetch(`http://127.0.0.1:${port}/proxy-on`, {
@@ -107,16 +70,7 @@ describe('control server', () => {
   });
 
   test('unknown path is 404 and set-geo with neither field is 400', async () => {
-    server = createControlServer({
-      getStatus: () => {
-        throw new Error('unused');
-      },
-      route: async () => ({ rules: [] }),
-      unroute: async () => ({ rules: [] }),
-      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
-      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
-      stop: () => {},
-    });
+    server = createControlServer(unusedHandlers());
     const port = await listen(server);
     const missing = await fetch(`http://127.0.0.1:${port}/nope`);
     assert.strictEqual(missing.status, 404);
@@ -130,21 +84,15 @@ describe('control server', () => {
   });
 
   test('GET /last-connect returns the handler value and POST /attach-state rejects invalid status', async () => {
-    let stored = defaultAttach('/tmp');
-    server = createControlServer({
-      getStatus: () => {
-        throw new Error('unused');
-      },
-      route: async () => ({ rules: [] }),
-      unroute: async () => ({ rules: [] }),
-      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
-      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
-      stop: () => {},
-      getLastConnect: () => ({ hostname: 'verify.example', at: 1 }),
-      setAttach: (next) => {
-        stored = next;
-      },
-    });
+    let stored = defaultAttach();
+    server = createControlServer(
+      unusedHandlers({
+        getLastConnect: () => ({ hostname: 'verify.example', at: 1 }),
+        setAttach: (next) => {
+          stored = next;
+        },
+      }),
+    );
     const port = await listen(server);
 
     const last = await fetch(`http://127.0.0.1:${port}/last-connect`);
@@ -160,25 +108,41 @@ describe('control server', () => {
 
     const missing = await fetch(`http://127.0.0.1:${port}/nope`);
     assert.strictEqual(missing.status, 404);
-    assert.strictEqual(stored.status, 'unverified');
+    assert.strictEqual(stored.status, 'needs_ui');
+  });
+
+  test('handler PaymentRequiredError becomes 402 with claim_url', async () => {
+    server = createControlServer(
+      unusedHandlers({
+        rotateIp: async () => {
+          throw new PaymentRequiredError('used up', 'https://dashboard.aluvia.io/cli-auth');
+        },
+      }),
+    );
+    const port = await listen(server);
+    const res = await fetch(`http://127.0.0.1:${port}/rotate-ip`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.strictEqual(res.status, 402);
+    assert.deepStrictEqual(await res.json(), {
+      error: 'used up',
+      code: 'payment_required',
+      claim_url: 'https://dashboard.aluvia.io/cli-auth',
+    });
   });
 
   test('POST /last-connect clears lastConnect and returns hostname null', async () => {
     let lastConnect = { hostname: 'verify.example' as string | null, at: 1 as number | null };
-    server = createControlServer({
-      getStatus: () => {
-        throw new Error('unused');
-      },
-      route: async () => ({ rules: [] }),
-      unroute: async () => ({ rules: [] }),
-      rotateIp: async () => ({ sessionId: 'n', connectionId: 1 }),
-      setGeo: async () => ({ targetGeo: null, connectionId: 1 }),
-      stop: () => {},
-      getLastConnect: () => lastConnect,
-      setLastConnect: (snapshot) => {
-        lastConnect = snapshot;
-      },
-    });
+    server = createControlServer(
+      unusedHandlers({
+        getLastConnect: () => lastConnect,
+        setLastConnect: (snapshot) => {
+          lastConnect = snapshot;
+        },
+      }),
+    );
     const port = await listen(server);
 
     const cleared = await fetch(`http://127.0.0.1:${port}/last-connect`, {

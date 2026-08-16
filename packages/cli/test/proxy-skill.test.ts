@@ -65,9 +65,9 @@ describe('proxy skill install', () => {
     assert.ok(!body.includes('net-internals'));
     assert.ok(!body.includes('last-connect'));
     const repoCopy = path.join(process.cwd(), '..', '..', 'skills', 'aluvia', 'SKILL.md');
-    if (fs.existsSync(repoCopy)) {
-      assert.strictEqual(body, fs.readFileSync(repoCopy, 'utf8'));
-    }
+    assert.ok(fs.existsSync(repoCopy), 'repo skills/aluvia/SKILL.md must exist');
+    assert.ok(src && fs.existsSync(src), 'packages/cli/skills/aluvia/SKILL.md must exist');
+    assert.strictEqual(body, fs.readFileSync(repoCopy, 'utf8'));
   });
 
   test('installProxySkill writes SKILL.md to ALUVIA_SKILL_DIRS', () => {
@@ -78,7 +78,7 @@ describe('proxy skill install', () => {
     assert.deepStrictEqual(result.skillPaths, [path.join(destRoot, 'aluvia', 'SKILL.md')]);
     const written = fs.readFileSync(result.skillPaths[0], 'utf8');
     assert.strictEqual(written, fs.readFileSync(bundledSkillPath()!, 'utf8'));
-    assert.strictEqual(result.skill, written);
+    assert.ok(!('skill' in result));
   });
 
   test('default dirs include ALUVIA_HOME/skills and ~/.agents/skills', () => {

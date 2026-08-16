@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { buildHelpJson } from '../src/cli.js';
+import { buildHelpJson, handleHelp } from '../src/cli.js';
+import { captureOutput } from '../src/mcp-helpers.js';
 
 describe('proxy help', () => {
   test('help JSON lists every proxy verb and ALUVIA_HOME', () => {
@@ -43,5 +44,14 @@ describe('proxy help', () => {
     assert.ok(!help.environment.includes('ALUVIA_PROXY_PORT'));
     assert.ok(help.environment.includes('ALUVIA_HOME'));
     assert.ok(help.environment.includes('ALUVIA_UPSTREAM'));
+  });
+
+  test('help is JSON on stdout with next', async () => {
+    const result = await captureOutput(() => handleHelp());
+    assert.strictEqual(result.isError, false);
+    assert.ok(Array.isArray(result.data.commands));
+    assert.match(String(result.data.next), /Follow next/);
+    const parsed = JSON.parse(JSON.stringify(result.data)) as { next?: string };
+    assert.ok(typeof parsed.next === 'string');
   });
 });

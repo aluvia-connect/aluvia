@@ -2,14 +2,15 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { isProcessAlive, PaymentRequiredError } from '@aluvia/sdk';
-import { resolveCredential } from './api-helpers.js';
+import { PaymentRequiredError } from './net/errors.js';
+import { isProcessAlive } from './net/process.js';
+import { credentialNext, resolveCredential } from './api-helpers.js';
 import { clearUpstream, getStoredUpstream, parseUpstreamUrl, saveUpstream } from './config.js';
 import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
 import { chromeRestartCommand } from './chrome-launch.js';
-import { tryGsettings, waitForExternalConnect, writeChromeProxyPolicy } from './proxy-attach.js';
+import { waitForExternalConnect, writeChromeProxyPolicy } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
 import { installProxySkill } from './proxy-skill.js';
 import {
@@ -42,22 +43,57 @@ function parsePortFlag(value: string, flag: string): number {
   return parsed;
 }
 
-function parseRestoreUrl(args: string[]): string | null {
+function parseUrlFlag(
+  args: string[],
+): { specified: false } | { specified: true; raw: string | null; url: string | null } {
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--url' && args[i + 1]) {
-      const raw = args[i + 1].trim();
-      if (!raw) return null;
-      try {
-        const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `https://${raw}`;
-        const parsed = new URL(withScheme);
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-        return parsed.href;
-      } catch {
-        return null;
+    if (args[i] !== '--url') continue;
+    const next = args[i + 1];
+    if (next == null || next.startsWith('-')) {
+      return { specified: true, raw: null, url: null };
+    }
+    const raw = next.trim();
+    if (!raw) return { specified: true, raw: next, url: null };
+    try {
+      const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `https://${raw}`;
+      const parsed = new URL(withScheme);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { specified: true, raw, url: null };
       }
+      return { specified: true, raw, url: parsed.href };
+    } catch {
+      return { specified: true, raw, url: null };
     }
   }
-  return null;
+  return { specified: false };
+}
+
+function parseRestoreUrl(args: string[]): string | null {
+  const parsed = parseUrlFlag(args);
+  return parsed.specified ? parsed.url : null;
+}
+
+function requireSetupUrl(args: string[]): string {
+  const parsed = parseUrlFlag(args);
+  if (!parsed.specified || parsed.raw == null) {
+    output(
+      {
+        error: 'Usage: aluvia setup --url <page>',
+        next: 'Pass the blocked page URL from the address bar.',
+      },
+      1,
+    );
+  }
+  if (!parsed.url) {
+    output(
+      {
+        error: `Invalid --url: '${parsed.raw}'. Use an http(s) page URL.`,
+        next: 'Pass the blocked page URL from the address bar.',
+      },
+      1,
+    );
+  }
+  return parsed.url;
 }
 
 function parseStartArgs(args: string[]): {
@@ -109,6 +145,11 @@ function statusNext(opts: {
   dataPort: number;
 }): { next: string; chromeCommand?: string } {
   if (!opts.live) {
+    if (opts.aimed) {
+      return {
+        next: 'Chrome is aimed at the proxy but the daemon is down. Run `aluvia start` or `aluvia setup --url <page>`. Do not quit Chrome.',
+      };
+    }
     return { next: 'Daemon is not running. Run `aluvia setup --url <blocked page>`.' };
   }
   if (!opts.healthy) {
@@ -396,7 +437,6 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
 
   const dataPort = state.dataPort;
   const policy = writeChromeProxyPolicy(dataPort);
-  await tryGsettings(dataPort);
   const aim: 'policy' | 'flags' = policy.path ? 'policy' : 'flags';
   const persistLimit =
     aim === 'flags'
@@ -406,30 +446,22 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
   const restoreUrl = parseRestoreUrl(args);
   const chromeCommand = chromeRestartCommand(dataPort, restoreUrl);
 
-  const alreadyVerified = state.attach.status === 'verified' && !policy.wrote;
-  if (!alreadyVerified) {
-    await persistAttach({
-      status: 'needs_ui',
-      method: null,
-      verifiedAt: null,
-      extensionPath: null,
-    });
-  }
+  const expectConnectAfter = Date.now();
+  await persistAttach({
+    status: 'needs_ui',
+    method: null,
+    expectConnectAfter,
+  });
 
-  let sinceMs = Date.now();
-  if (!policy.wrote && policy.mtimeMs != null) {
-    sinceMs = policy.mtimeMs;
-  }
   const timeoutMs = Number(process.env.ALUVIA_ATTACH_WAIT_MS) || 1_000;
-  const seen = alreadyVerified || (await waitForExternalConnect({ timeoutMs, sinceMs }));
+  const seen = await waitForExternalConnect({ timeoutMs, sinceMs: expectConnectAfter });
   const verifiedNow = seen || readProxyJson()?.attach.status === 'verified';
 
   if (verifiedNow) {
     const attach: ProxyAttachState = {
       status: 'verified',
       method: aim,
-      verifiedAt: new Date().toISOString(),
-      extensionPath: null,
+      expectConnectAfter,
     };
     await persistAttach(attach);
     return {
@@ -457,13 +489,14 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
 }
 
 function attachPublicFields(result: AttachOutcome): Record<string, unknown> {
+  const needsChromeRestart = result.status !== 'verified';
   return {
     status: result.status,
     method: result.method,
     aim: result.aim,
-    chromeCommand: result.chromeCommand,
     restoreUrl: result.restoreUrl,
-    needsChromeRestart: result.status !== 'verified',
+    needsChromeRestart,
+    ...(needsChromeRestart ? { chromeCommand: result.chromeCommand } : {}),
     ...(result.policyPath ? { policyPath: result.policyPath } : {}),
     ...(result.persistLimit ? { persistLimit: result.persistLimit } : {}),
   };
@@ -476,9 +509,18 @@ function setupNext(ready: boolean): string {
   return 'Quit this Chrome. Run chromeCommand. Open or reload the blocked tab. Do not run setup again. If still blocked, run `aluvia status`. If aimed is false, run setup --url <that page> and chromeCommand again.';
 }
 
+async function failIfPaymentRequired(res: { status: number; json: Record<string, unknown> }): Promise<void> {
+  if (res.status !== 402 && res.json.code !== 'payment_required') return;
+  const { paymentRequiredPayload } = await import('./auth.js');
+  const claimUrl = typeof res.json.claim_url === 'string' ? res.json.claim_url : null;
+  const err = new PaymentRequiredError(String(res.json.error ?? 'Trial data is used up.'), claimUrl);
+  output(await paymentRequiredPayload(err), 1);
+}
+
 async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: string[] }> {
   try {
     const res = await controlRequest('POST', on ? '/proxy-on' : '/proxy-off', {});
+    await failIfPaymentRequired(res);
     if (res.status !== 200) {
       output({ error: String(res.json.error ?? (on ? 'proxy-on failed' : 'proxy-off failed')) }, 1);
     }
@@ -491,15 +533,8 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
   }
 }
 
-async function handleAttach(args: string[]): Promise<void> {
-  const result = await runAttach(args);
-  output({
-    proxyUrl: result.proxyUrl,
-    ...attachPublicFields(result),
-  });
-}
-
 async function handleSetup(args: string[]): Promise<void> {
+  requireSetupUrl(args);
   const skill = installProxySkill();
   const result = await runAttach(args);
   await postEgress(true);
@@ -518,7 +553,6 @@ async function handleSetup(args: string[]): Promise<void> {
   output({
     next: setupNext(ready),
     skillPath,
-    ...(skill.skill ? { skill: skill.skill } : {}),
     ...statusJson,
     healthy,
     ready,
@@ -579,12 +613,6 @@ async function handleStop(): Promise<void> {
   });
 }
 
-function credentialNext(recycled: boolean): string {
-  return recycled
-    ? 'Reload the tab. Do not restart Chrome.'
-    : 'Saved. If Chrome is not aimed yet, run `aluvia setup --url <page>`.';
-}
-
 /** Restart proxyd so a newly saved API key or BYO URL takes effect. Chrome stays aimed. */
 export async function recycleDaemonIfRunning(): Promise<{ recycled: boolean }> {
   const existing = readProxyJson();
@@ -602,12 +630,18 @@ export async function recycleDaemonIfRunning(): Promise<{ recycled: boolean }> {
 }
 
 async function handleStatus(): Promise<void> {
+  const state = readProxyJson();
   try {
     const { json } = await controlRequest('GET', '/status');
-    const state = readProxyJson();
     const healthy = state ? await bothPortsAccept(state) : false;
     output(state ? { ...statusFields(state, healthy), ...json, healthy } : { ...json, healthy });
   } catch (err) {
+    if (isControlClientError(err, 'not_running')) {
+      if (state) {
+        output(statusFields(state, false));
+      }
+      output({ error: NOT_RUNNING }, 1);
+    }
     failControl(err);
   }
 }
@@ -623,12 +657,23 @@ async function requireHealthyDaemon(): Promise<void> {
   }
 }
 
+const RESERVED_GEO = new Set(['all', 'any', '*']);
+
 function parseGeoFlag(args: string[]): { specified: boolean; geo: string | null } {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--geo') {
       const value = args[i + 1];
       if (value == null || value.startsWith('-')) {
         output({ error: 'Usage: --geo <geo> (e.g. --geo US)' }, 1);
+      }
+      if (RESERVED_GEO.has(value.trim().toLowerCase())) {
+        output(
+          {
+            error: 'Omit --geo to use every geo. --geo takes a country code (e.g. US).',
+            next: 'Retry without --geo, or pass --geo US.',
+          },
+          1,
+        );
       }
       return { specified: true, geo: value };
     }
@@ -667,6 +712,7 @@ async function readControlStatus(): Promise<{
 async function postSetGeo(geo: string | null): Promise<string | null> {
   try {
     const res = await controlRequest('POST', '/set-geo', geo == null ? { clear: true } : { geo });
+    await failIfPaymentRequired(res);
     if (res.status !== 200) output({ error: String(res.json.error ?? 'set-geo failed') }, 1);
     return typeof res.json.targetGeo === 'string' ? res.json.targetGeo : null;
   } catch (err) {
@@ -677,6 +723,7 @@ async function postSetGeo(geo: string | null): Promise<string | null> {
 async function postRotate(): Promise<{ sessionId: string; connectionId: unknown }> {
   try {
     const res = await controlRequest('POST', '/rotate-ip', {});
+    await failIfPaymentRequired(res);
     if (res.status !== 200) output({ error: String(res.json.error ?? 'rotate-ip failed') }, 1);
     return { sessionId: String(res.json.sessionId ?? ''), connectionId: res.json.connectionId };
   } catch (err) {
@@ -696,8 +743,8 @@ async function handleProxySwitch(on: boolean): Promise<void> {
 }
 
 async function handleProxyOn(args: string[]): Promise<void> {
-  await requireHealthyDaemon();
   const geoFlag = parseGeoFlag(args);
+  await requireHealthyDaemon();
   const byo = resolveCredential().kind === 'byo';
   if (geoFlag.specified && byo) {
     output({ error: BYO_NETWORK }, 1);
@@ -746,11 +793,11 @@ async function handleProxyOn(args: string[]): Promise<void> {
 }
 
 async function handleRotateIp(args: string[]): Promise<void> {
+  const geoFlag = parseGeoFlag(args);
   if (resolveCredential().kind === 'byo') {
     output({ error: BYO_NETWORK }, 1);
   }
   await requireHealthyDaemon();
-  const geoFlag = parseGeoFlag(args);
   const before = await readControlStatus();
   const geo = desiredGeo(geoFlag, before.targetGeo, false);
   if (before.targetGeo !== geo) {
@@ -823,9 +870,6 @@ export async function handleProxy(args: string[]): Promise<void> {
   }
   if (subcommand === 'rotate-ip') {
     return handleRotateIp(args.slice(1));
-  }
-  if (subcommand === 'attach') {
-    return handleAttach(args.slice(1));
   }
   if (subcommand === 'setup') {
     return handleSetup(args.slice(1));

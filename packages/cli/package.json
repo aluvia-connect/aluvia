@@ -18,26 +18,16 @@
   "bin": {
     "aluvia": "./dist/esm/cli.js"
   },
-  "exports": {
-    ".": {
-      "types": "./dist/types/cli-adapter.d.ts",
-      "import": "./dist/esm/cli-adapter.js",
-      "require": "./dist/cjs/cli-adapter.js"
-    },
-    "./package.json": "./package.json"
-  },
   "files": [
     "dist/**/*",
     "skills/**/*",
-    "vendor/**/*",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
-    "vendor-sdk": "node ./scripts/vendor-sdk.mjs",
+    "build": "tsc -p tsconfig.esm.json",
+    "sync-skill": "node ./scripts/sync-skill.mjs",
     "prepack": "node ./scripts/prepack.mjs",
-    "postpack": "node ./scripts/postpack.mjs",
     "test": "node --import tsx --test test/*.test.ts",
     "lint": "prettier --check src test",
     "lint:fix": "prettier --write src test"
@@ -50,8 +40,7 @@
   },
   "keywords": [
     "cli",
-    "browser-automation",
-    "playwright",
+    "proxy",
     "aluvia"
   ],
   "devDependencies": {
@@ -61,6 +50,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@aluvia/sdk": "^2.1.0"
+    "proxy-chain": "^2.6.1"
   }
 }

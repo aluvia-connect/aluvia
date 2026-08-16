@@ -101,27 +101,37 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
   });
 
   test('proxy-on closes a live CONNECT so the next one can flip to Aluvia', async () => {
-    const held = await new Promise<{ socket: import('net').Socket }>((resolve, reject) => {
-      const req = http.request({
-        host: '127.0.0.1',
-        port: dataPort,
-        method: 'CONNECT',
-        path: 'held.example:443',
+    const target = await new Promise<import('net').Server>((resolve, reject) => {
+      const server = http.createServer();
+      server.listen(0, '127.0.0.1', () => resolve(server));
+      server.on('error', reject);
+    });
+    const targetPort = (target.address() as import('net').AddressInfo).port;
+    try {
+      const held = await new Promise<{ socket: import('net').Socket }>((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1',
+          port: dataPort,
+          method: 'CONNECT',
+          path: `127.0.0.1:${targetPort}`,
+        });
+        req.on('connect', (_res, socket) => resolve({ socket }));
+        req.on('error', reject);
+        req.setTimeout(2000, () => req.destroy(new Error('CONNECT timeout')));
+        req.end();
       });
-      req.on('connect', (_res, socket) => resolve({ socket }));
-      req.on('error', reject);
-      req.setTimeout(2000, () => req.destroy(new Error('CONNECT timeout')));
-      req.end();
-    });
-    const closed = new Promise<void>((resolve) => {
-      held.socket.once('close', () => resolve());
-    });
-    const routed = await captureOutput(() => handleProxy(['proxy-on']));
-    assert.strictEqual(routed.isError, false, String(routed.data.error ?? ''));
-    await Promise.race([
-      closed,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('live CONNECT was not dropped')), 2000)),
-    ]);
+      const closed = new Promise<void>((resolve) => {
+        held.socket.once('close', () => resolve());
+      });
+      const routed = await captureOutput(() => handleProxy(['proxy-on']));
+      assert.strictEqual(routed.isError, false, String(routed.data.error ?? ''));
+      await Promise.race([
+        closed,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('live CONNECT was not dropped')), 2000)),
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => target.close(() => resolve()));
+    }
   });
 
   test('proxy-off goes direct and does not hit the mock gateway', async () => {
@@ -145,15 +155,39 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     assert.deepStrictEqual(gateway.connects, []);
   });
 
-  test('control refuses catch-all * on leftover /route', async () => {
-    const res = await fetch(`http://127.0.0.1:${controlPort}/route`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ host: '*' }),
+  test('rotate-ip closes a live CONNECT so the next request uses the new session', async () => {
+    const on = await captureOutput(() => handleProxy(['proxy-on']));
+    assert.strictEqual(on.isError, false, String(on.data.error ?? ''));
+    const held = await new Promise<{ socket: import('net').Socket }>((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1',
+        port: dataPort,
+        method: 'CONNECT',
+        path: 'held.example:443',
+      });
+      req.on('connect', (_res, socket) => resolve({ socket }));
+      req.on('error', reject);
+      req.setTimeout(2000, () => req.destroy(new Error('CONNECT timeout')));
+      req.end();
     });
-    assert.strictEqual(res.status, 400);
-    const body = (await res.json()) as { error?: string };
-    assert.strictEqual(body.error, 'catch-all * is not allowed');
+    const closed = new Promise<void>((resolve) => {
+      held.socket.once('close', () => resolve());
+    });
+    const rotated = await captureOutput(() => handleProxy(['rotate-ip']));
+    assert.strictEqual(rotated.isError, false, String(rotated.data.error ?? ''));
+    await Promise.race([
+      closed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('live CONNECT was not dropped')), 2000)),
+    ]);
+  });
+
+  test('proxy-on after trial is used up is payment_required with a cli_code URL', async () => {
+    api.setPaymentRequired(true);
+    const result = await captureOutput(() => handleProxy(['proxy-on']));
+    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.data.code, 'payment_required');
+    assert.strictEqual(result.data.claim_url, 'https://dashboard.aluvia.io/cli-auth?cli_code=user-code-1');
+    assert.match(String(result.data.next), /aluvia auth login/);
   });
 
   test('rotate-ip changes only the session id', async () => {
@@ -169,6 +203,27 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     assert.notStrictEqual(sessionId, previous);
     assert.strictEqual(rotated.data.connectionId, status.data.connectionId);
     assert.strictEqual(api.state.session_id, sessionId);
+  });
+
+  test('proxy-on and rotate-ip reject --geo all / any / *', async () => {
+    const before = await captureOutput(() => handleProxy(['status']));
+    assert.strictEqual(before.isError, false, String(before.data.error ?? ''));
+    const targetBefore = before.data.targetGeo ?? null;
+
+    for (const value of ['all', 'ANY', '*']) {
+      const result = await captureOutput(() => handleProxy(['proxy-on', '--geo', value]));
+      assert.strictEqual(result.isError, true, value);
+      assert.match(String(result.data.error), /Omit --geo/);
+      assert.match(String(result.data.next), /without --geo/);
+    }
+
+    const rotate = await captureOutput(() => handleProxy(['rotate-ip', '--geo', 'any']));
+    assert.strictEqual(rotate.isError, true);
+    assert.match(String(rotate.data.error), /Omit --geo/);
+
+    const after = await captureOutput(() => handleProxy(['status']));
+    assert.strictEqual(after.isError, false, String(after.data.error ?? ''));
+    assert.strictEqual(after.data.targetGeo ?? null, targetBefore);
   });
 
   test('proxy-on --geo pins, no-ops in that geo, omit --geo selects any geo', async () => {
@@ -270,7 +325,7 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
         sessionId: 'cccccccccccccccccccccccccccccccc',
         targetGeo: null,
         rules: [],
-        attach: defaultAttach(home),
+        attach: defaultAttach(),
       });
       const result = await captureOutput(() => handleProxy(['proxy-on']));
       assert.strictEqual(result.isError, true);

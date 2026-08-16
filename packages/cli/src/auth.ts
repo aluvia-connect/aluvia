@@ -1,4 +1,5 @@
-import { AluviaApi, PaymentRequiredError } from '@aluvia/sdk';
+import { AluviaApi } from './net/aluvia-api.js';
+import { PaymentRequiredError } from './net/errors.js';
 import {
   getStoredApiKey,
   getStoredInstallId,
@@ -8,14 +9,15 @@ import {
   getPendingCliAuth,
   savePendingCliAuth,
   clearPendingCliAuth,
+  configPath,
   type PendingCliAuth,
 } from './config.js';
+import { credentialNext } from './api-helpers.js';
 import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
 
 const DEFAULT_API_URL = 'https://api.aluvia.io';
 const DEFAULT_CLAIM_URL = 'https://dashboard.aluvia.io/cli-auth';
 const DEVICE_FLOW_TIMEOUT_MS = 600_000;
-const STORED_KEY_LOCATION = '~/.aluvia/config.json';
 
 export const PAYMENT_REQUIRED_NEXT =
   'Show claim_url to the human. Then run `aluvia auth login` to wait until they finish. When that succeeds, retry.';
@@ -44,18 +46,29 @@ async function recycleAfterCredentialChange(): Promise<boolean> {
   return result.recycled;
 }
 
-function credentialNext(recycled: boolean): string {
-  return recycled
-    ? 'Reload the tab. Do not restart Chrome.'
-    : 'Saved. If Chrome is not aimed yet, run `aluvia setup --url <page>`.';
+function aluviaApiOptions(apiKey: string): { apiKey: string; apiBaseUrl?: string } {
+  const fromEnv = (process.env.ALUVIA_API_BASE_URL ?? '').trim();
+  return fromEnv ? { apiKey, apiBaseUrl: fromEnv } : { apiKey };
 }
 
 async function finishWithKey(apiKey: string): Promise<never> {
   try {
-    const api = new AluviaApi({ apiKey });
+    const api = new AluviaApi(aluviaApiOptions(apiKey));
     await api.account.get();
-    saveApiKey(apiKey);
-    clearUpstream();
+  } catch (err) {
+    if (err instanceof MCPOutputCapture) throw err;
+    if (err instanceof PaymentRequiredError) {
+      return authOutput(await paymentRequiredPayload(err), 1);
+    }
+    return authOutput(
+      { error: `Received an API key but it failed verification: ${(err as Error).message}` },
+      1,
+    );
+  }
+
+  saveApiKey(apiKey);
+  clearUpstream();
+  try {
     const recycled = await recycleAfterCredentialChange();
     return authOutput({
       status: 'authenticated',
@@ -65,7 +78,12 @@ async function finishWithKey(apiKey: string): Promise<never> {
   } catch (err) {
     if (err instanceof MCPOutputCapture) throw err;
     return authOutput(
-      { error: `Received an API key but it failed verification: ${(err as Error).message}` },
+      {
+        status: 'authenticated',
+        recycled: false,
+        error: `API key saved but the daemon failed to restart: ${(err as Error).message}`,
+        next: 'Key is saved. Run `aluvia start` or `aluvia setup --url <page>`.',
+      },
       1,
     );
   }
@@ -142,8 +160,7 @@ async function runAuth(): Promise<never> {
 
   if (!alreadyShown) {
     console.error('Authenticate with Aluvia:\n');
-    console.error(`  1. Open: ${session.claimUrl}`);
-    console.error(`  2. Confirm this code matches: ${session.userCode}\n`);
+    console.error(`  Open: ${session.claimUrl}\n`);
   }
 
   const intervalMs = session.interval * 1000;
@@ -174,6 +191,15 @@ async function runAuth(): Promise<never> {
       clearPendingCliAuth();
       return finishWithKey(apiKey);
     }
+    if (status === 'approved') {
+      clearPendingCliAuth();
+      return authOutput(
+        {
+          error: 'Authentication succeeded but no API key was returned. Run `aluvia auth login` again.',
+        },
+        1,
+      );
+    }
     if (status === 'denied') {
       clearPendingCliAuth();
       return authOutput({ error: 'Authentication was denied in the browser.' }, 1);
@@ -203,7 +229,7 @@ function runStatus(): never {
       authenticated: true,
       source: 'config',
       provider: 'aluvia',
-      configFile: STORED_KEY_LOCATION,
+      configFile: configPath(),
     });
   }
   if (getStoredInstallId()) {
@@ -226,6 +252,9 @@ export async function handleAuth(args: string[]): Promise<void> {
   }
   if (subcommand === 'login') {
     return runAuth();
+  }
+  if (subcommand === 'logout') {
+    return authOutput({ error: AUTH_USAGE }, 1);
   }
 
   return finishWithKey(subcommand);

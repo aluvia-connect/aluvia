@@ -1,6 +1,15 @@
 import net from 'node:net';
-import { isProcessAlive } from '@aluvia/sdk';
+import { isProcessAlive } from './net/process.js';
 import { readProxyJson, type ProxyJson } from './proxy-state.js';
+
+export const DEFAULT_CONTROL_REQUEST_TIMEOUT_MS = 35_000;
+
+export function controlRequestTimeoutMs(): number {
+  const raw = (process.env.ALUVIA_CONTROL_TIMEOUT_MS ?? '').trim();
+  const parsed = raw ? Number(raw) : NaN;
+  if (Number.isInteger(parsed) && parsed >= 1) return parsed;
+  return DEFAULT_CONTROL_REQUEST_TIMEOUT_MS;
+}
 
 export class ControlClientError extends Error {
   readonly code: 'not_running' | 'timeout';
@@ -55,7 +64,7 @@ export async function controlRequest(
     timer = setTimeout(() => {
       controller.abort();
       reject(new ControlClientError('timeout'));
-    }, 2000);
+    }, controlRequestTimeoutMs());
   });
 
   const run = async (): Promise<{ status: number; json: Record<string, unknown> }> => {

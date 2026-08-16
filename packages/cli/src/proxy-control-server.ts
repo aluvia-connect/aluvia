@@ -1,7 +1,12 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { parseRouteHost } from './proxy-host.js';
-import type { LastConnectSnapshot, ProxyAttachState, ProxyEgress } from './proxy-state.js';
+import { PaymentRequiredError } from './net/errors.js';
+import {
+  normalizeAttach,
+  type LastConnectSnapshot,
+  type ProxyAttachState,
+  type ProxyEgress,
+} from './proxy-state.js';
 
 export class ControlError extends Error {
   statusCode: number;
@@ -28,8 +33,6 @@ export type ControlStatusBody = {
 
 export type ControlHandlers = {
   getStatus: () => ControlStatusBody;
-  route: (host: string) => Promise<{ rules: string[] }>;
-  unroute: (host: string) => Promise<{ rules: string[] }>;
   rotateIp: () => Promise<{ sessionId: string; connectionId: number }>;
   setGeo: (body: { geo?: string; clear?: boolean }) => Promise<{
     targetGeo: string | null;
@@ -74,11 +77,6 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-function hostFromBody(body: Record<string, unknown>): string {
-  const host = body.host;
-  return typeof host === 'string' ? host : '';
-}
-
 export function createControlServer(handlers: ControlHandlers): http.Server {
   return http.createServer((req, res) => {
     void handleRequest(req, res, handlers);
@@ -96,32 +94,6 @@ async function handleRequest(
 
     if (method === 'GET' && pathname === '/status') {
       sendJson(res, 200, handlers.getStatus());
-      return;
-    }
-
-    if (method === 'POST' && pathname === '/route') {
-      const body = await readJsonBody(req);
-      const parsed = parseRouteHost(hostFromBody(body));
-      if (!parsed.ok) {
-        sendJson(res, 400, { error: parsed.error });
-        return;
-      }
-      const result = await handlers.route(parsed.host);
-      sendJson(res, 200, result);
-      return;
-    }
-
-    if (method === 'POST' && pathname === '/unroute') {
-      const body = await readJsonBody(req);
-      const rawHost = hostFromBody(body);
-      const parsed = parseRouteHost(rawHost);
-      if (!parsed.ok && parsed.error === 'host is required') {
-        sendJson(res, 400, { error: 'host is required' });
-        return;
-      }
-      const host = parsed.ok ? parsed.host : rawHost.trim().replace(/\.+$/, '').toLowerCase();
-      const result = await handlers.unroute(host);
-      sendJson(res, 200, result);
       return;
     }
 
@@ -194,23 +166,11 @@ async function handleRequest(
 
     if (method === 'POST' && pathname === '/attach-state') {
       const body = await readJsonBody(req);
-      const status = body.status;
-      if (status !== 'unverified' && status !== 'verified' && status !== 'needs_ui') {
+      if (body.status !== 'verified' && body.status !== 'needs_ui' && body.status !== 'unverified') {
         sendJson(res, 400, { error: 'invalid attach status' });
         return;
       }
-      const attach: ProxyAttachState = {
-        status,
-        method:
-          body.method === 'gsettings' ||
-          body.method === 'extension' ||
-          body.method === 'policy' ||
-          body.method === 'flags'
-            ? body.method
-            : null,
-        verifiedAt: typeof body.verifiedAt === 'string' ? body.verifiedAt : null,
-        extensionPath: typeof body.extensionPath === 'string' ? body.extensionPath : null,
-      };
+      const attach = normalizeAttach(body);
       handlers.setAttach?.(attach);
       sendJson(res, 200, { attach });
       return;
@@ -220,6 +180,14 @@ async function handleRequest(
   } catch (err) {
     if (err instanceof ControlError) {
       sendJson(res, err.statusCode, { error: err.message });
+      return;
+    }
+    if (err instanceof PaymentRequiredError) {
+      sendJson(res, 402, {
+        error: err.message,
+        code: 'payment_required',
+        claim_url: err.claimUrl,
+      });
       return;
     }
     const message = err instanceof Error ? err.message : String(err);

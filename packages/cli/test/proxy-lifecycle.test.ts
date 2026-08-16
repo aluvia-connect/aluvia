@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import http from 'node:http';
 import { captureOutput } from '../src/mcp-helpers.js';
 import { handleProxy } from '../src/proxy.js';
 import { defaultAttach, readProxyJson, writeProxyJson, type ProxyJson } from '../src/proxy-state.js';
@@ -18,6 +19,7 @@ const ENV_KEYS = [
   'ALUVIA_INSTALL_ID',
   'ALUVIA_PROXY_PORT',
   'ALUVIA_PROXY_CONTROL_PORT',
+  'ALUVIA_CONTROL_TIMEOUT_MS',
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -130,6 +132,16 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(back.data.recycled, true);
   });
 
+  test('start maps 402 on the first session mint to payment_required', async () => {
+    delete process.env.ALUVIA_API_KEY;
+    api.setPaymentRequired(true, { exceptPost: true });
+    const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(result.isError, true);
+    assert.strictEqual(result.data.code, 'payment_required');
+    assert.strictEqual(result.data.claim_url, 'https://dashboard.aluvia.io/cli-auth?cli_code=user-code-1');
+    assert.match(String(result.data.next), /aluvia auth login/);
+  });
+
   test('start maps 402 to payment_required', async () => {
     delete process.env.ALUVIA_API_KEY;
     api.setPaymentRequired(true);
@@ -153,6 +165,18 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.deepStrictEqual(state.rules, []);
     assert.match(api.state.session_id ?? '', /^[0-9a-f]{32}$/);
     assert.strictEqual(api.state.session_id, state.sessionId);
+  });
+
+  test('stale --connection-id creates a new connection after GET 404', async () => {
+    const result = await captureOutput(() =>
+      handleProxy([...startArgs(dataPort, controlPort), '--connection-id', '9999']),
+    );
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.connectionId, 3449);
+    assert.ok(
+      api.requests.some((req) => req.method === 'GET' && req.url.startsWith('/account/connections/9999')),
+    );
+    assert.ok(api.requests.some((req) => req.method === 'POST' && req.url === '/account/connections'));
   });
 
   test('--connection-id reuses the seeded connection without POST', async () => {
@@ -208,7 +232,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
       sessionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       targetGeo: null,
       rules: [],
-      attach: defaultAttach(home),
+      attach: defaultAttach(),
     };
     writeProxyJson(stale);
     const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
@@ -263,8 +287,37 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.deepStrictEqual(after.rules, rules);
 
     const status = await captureOutput(() => handleProxy(['status']));
-    assert.strictEqual(status.isError, true);
-    assert.strictEqual(status.data.error, 'proxyd is not running. Run `aluvia start`.');
+    assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
+    assert.strictEqual(status.data.healthy, false);
+    assert.ok(typeof status.data.next === 'string');
+    assert.match(String(status.data.next), /setup --url/);
+    assert.ok(status.data.what);
+  });
+
+  test('status when aimed and daemon is dead tells the agent to start without quitting Chrome', async () => {
+    writeProxyJson({
+      pid: 999999992,
+      ready: false,
+      dataPort,
+      controlPort,
+      proxyUrl: `http://127.0.0.1:${dataPort}`,
+      controlUrl: `http://127.0.0.1:${controlPort}`,
+      connectionId: 3449,
+      sessionId: 'dddddddddddddddddddddddddddddddd',
+      targetGeo: null,
+      rules: ['*'],
+      attach: {
+        status: 'verified',
+        method: 'flags',
+        expectConnectAfter: Date.now(),
+      },
+    });
+    const status = await captureOutput(() => handleProxy(['status']));
+    assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
+    assert.strictEqual(status.data.aimed, true);
+    assert.strictEqual(status.data.egress, 'aluvia');
+    assert.match(String(status.data.next), /aluvia start/);
+    assert.match(String(status.data.next), /Do not quit Chrome/);
   });
 
   test('stop when already dead', async () => {
@@ -294,6 +347,66 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(result.data.egress, 'aluvia');
   });
 
+  test('status succeeds when control responds after 3s', async () => {
+    process.env.ALUVIA_CONTROL_TIMEOUT_MS = '10000';
+    const delayed = http.createServer((req, res) => {
+      if (req.method === 'GET' && (req.url ?? '') === '/status') {
+        setTimeout(() => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              pid: process.pid,
+              proxyUrl: `http://127.0.0.1:${dataPort}`,
+              controlUrl: `http://127.0.0.1:1`,
+              connectionId: 3449,
+              sessionId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+              targetGeo: null,
+              rules: [],
+              count: 0,
+              attach: defaultAttach(),
+              egress: 'direct',
+            }),
+          );
+        }, 3000);
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    const delayedPort: number = await new Promise((resolve, reject) => {
+      delayed.listen(0, '127.0.0.1', () => {
+        const addr = delayed.address();
+        resolve(typeof addr === 'object' && addr ? addr.port : 0);
+      });
+      delayed.on('error', reject);
+    });
+    try {
+      writeProxyJson({
+        pid: process.pid,
+        ready: true,
+        dataPort,
+        controlPort: delayedPort,
+        proxyUrl: `http://127.0.0.1:${dataPort}`,
+        controlUrl: `http://127.0.0.1:${delayedPort}`,
+        connectionId: 3449,
+        sessionId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        targetGeo: null,
+        rules: [],
+        attach: defaultAttach(),
+      });
+      const started = Date.now();
+      const result = await captureOutput(() => handleProxy(['status']));
+      const elapsed = Date.now() - started;
+      assert.ok(elapsed >= 2500, `status returned too fast (${elapsed}ms)`);
+      assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+      assert.strictEqual(result.data.sessionId, 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
+    } finally {
+      const state = readProxyJson();
+      if (state) writeProxyJson({ ...state, pid: null, ready: false });
+      await new Promise<void>((resolve) => delayed.close(() => resolve()));
+    }
+  });
+
   test('control timeout', async () => {
     const hangPort = await findFreePort();
     const hangSockets = new Set<net.Socket>();
@@ -306,6 +419,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
       hang.on('error', reject);
     });
     try {
+      process.env.ALUVIA_CONTROL_TIMEOUT_MS = '400';
       writeProxyJson({
         pid: process.pid,
         ready: true,
@@ -317,12 +431,12 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
         sessionId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         targetGeo: null,
         rules: [],
-        attach: defaultAttach(home),
+        attach: defaultAttach(),
       });
       const started = Date.now();
       const result = await captureOutput(() => handleProxy(['status']));
       const elapsed = Date.now() - started;
-      assert.ok(elapsed <= 3000, `status took ${elapsed}ms`);
+      assert.ok(elapsed <= 2000, `status took ${elapsed}ms`);
       assert.strictEqual(result.isError, true);
       assert.strictEqual(result.data.error, 'proxyd did not respond. Run `aluvia status`.');
     } finally {

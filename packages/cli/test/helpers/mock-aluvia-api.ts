@@ -13,11 +13,12 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
   url: string;
   state: MockConnection;
   requests: Array<{ method: string; url: string; headers: http.IncomingHttpHeaders }>;
-  setPaymentRequired: (value: boolean) => void;
+  setPaymentRequired: (value: boolean, opts?: { exceptPost?: boolean }) => void;
   close: () => Promise<void>;
 }> {
   const requests: Array<{ method: string; url: string; headers: http.IncomingHttpHeaders }> = [];
   let paymentRequired = false;
+  let paymentRequiredExceptPost = false;
   const state: MockConnection = {
     id: seed?.id ?? 3449,
     session_id: seed?.session_id ?? null,
@@ -66,20 +67,27 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
       });
     }
     if (paymentRequired && url.startsWith('/account/connections')) {
-      return send(402, {
-        success: false,
-        error: {
-          code: 'payment_required',
-          message:
-            'Trial data is used up. Ask the human for an API key (`aluvia auth <key>`) or a proxy URL (`aluvia proxy-provider <url>`).',
-          claim_url: 'https://dashboard.aluvia.io/cli-auth',
-        },
-      });
+      if (!(paymentRequiredExceptPost && req.method === 'POST')) {
+        return send(402, {
+          success: false,
+          error: {
+            code: 'payment_required',
+            message:
+              'Trial data is used up. Ask the human for an API key (`aluvia auth <key>`) or a proxy URL (`aluvia proxy-provider <url>`).',
+            claim_url: 'https://dashboard.aluvia.io/cli-auth',
+          },
+        });
+      }
     }
     if (req.method === 'POST' && url === '/account/connections') {
       return send(201, envelope());
     }
     if (req.method === 'GET' && url.startsWith('/account/connections/')) {
+      const idPart = url.split('?')[0].split('/').pop();
+      const id = Number(idPart);
+      if (Number.isFinite(id) && id !== state.id) {
+        return send(404, { error: 'not found' });
+      }
       return send(200, envelope());
     }
     if (req.method === 'PATCH' && url.startsWith('/account/connections/')) {
@@ -106,8 +114,9 @@ export async function createMockAluviaApi(seed?: Partial<MockConnection>): Promi
     url,
     state,
     requests,
-    setPaymentRequired: (value: boolean) => {
+    setPaymentRequired: (value: boolean, opts?: { exceptPost?: boolean }) => {
       paymentRequired = value;
+      paymentRequiredExceptPost = opts?.exceptPost ?? false;
     },
     close: () =>
       new Promise((resolve) => {
