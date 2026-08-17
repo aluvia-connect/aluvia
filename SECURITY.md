@@ -41,6 +41,6 @@ For vulnerabilities in the Aluvia API or web services, please contact security@a
 
 When using `aluvia-cli`:
 
-1. **Never commit API keys** — use environment variables or `aluvia auth <key>`
+1. **Never commit API keys** — persist them with `aluvia auth <key>`
 2. **Never print API keys** — CLI JSON must not echo secrets
 3. **Keep dependencies updated** — run `npm audit` regularly

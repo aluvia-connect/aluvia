@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { captureOutput } from '../src/mcp-helpers.js';
+import { captureOutput } from '../src/output-capture.js';
 import { handleProxy } from '../src/proxy.js';
 import { defaultAttach, readProxyJson, writeProxyJson } from '../src/proxy-state.js';
 import { createMockAluviaApi } from './helpers/mock-aluvia-api.js';

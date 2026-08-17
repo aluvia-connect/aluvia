@@ -28,19 +28,13 @@ export function resolveCredential(): Credential {
   return { kind: 'install', installId: ensureInstallId() };
 }
 
-/** @deprecated Use resolveCredential(). Kept for call sites that only need a token. */
-export function resolveApiKey(): string | undefined {
-  const envKey = (process.env.ALUVIA_API_KEY ?? '').trim();
-  if (envKey) return envKey;
-  return getStoredApiKey();
-}
-
 export function requireApi(): AluviaApi {
   const cred = resolveCredential();
   if (cred.kind === 'byo') {
     return output(
       {
         error: 'This command needs the Aluvia network. Run `aluvia proxy-provider aluvia`.',
+        next: 'Run `aluvia proxy-provider aluvia`, then retry.',
       },
       1,
     );
@@ -56,5 +50,5 @@ export function requireApi(): AluviaApi {
 export function credentialNext(recycled: boolean): string {
   return recycled
     ? 'Reload the tab. Do not restart Chrome.'
-    : 'Saved. If Chrome is not aimed yet, run `aluvia setup --url <page>`.';
+    : 'Saved. If Chrome is not aimed yet, run `aluvia setup`.';
 }

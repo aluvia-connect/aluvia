@@ -8,11 +8,11 @@ import { handleGeos } from './geos.js';
 import { handleProxy } from './proxy.js';
 import { handleProxyDaemon } from './proxy-daemon.js';
 import { PaymentRequiredError } from './net/errors.js';
-import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
+import { isCapturing, OutputCapture } from './output-capture.js';
 
 export function output(data: Record<string, unknown>, exitCode = 0): never {
   if (isCapturing()) {
-    throw new MCPOutputCapture(data, exitCode);
+    throw new OutputCapture(data, exitCode);
   }
   console.log(JSON.stringify(data));
   process.exit(exitCode);
@@ -22,7 +22,6 @@ const HELP_NEXT = 'These are the commands. Every command prints JSON. Follow nex
 
 export function buildHelpJson(): {
   commands: Array<{ command: string; description: string; options: unknown[] }>;
-  environment: string[];
 } {
   return {
     commands: [
@@ -32,7 +31,8 @@ export function buildHelpJson(): {
         options: [
           {
             flag: '--url <url>',
-            description: 'Blocked page to reopen after the one Chrome restart',
+            description:
+              'Optional. Open this page after the Chrome restart. Omit to restore the last session only.',
           },
         ],
       },
@@ -125,7 +125,6 @@ export function buildHelpJson(): {
         options: [{ flag: '--json', description: 'Accepted; help is always JSON' }],
       },
     ],
-    environment: ['ALUVIA_API_KEY', 'ALUVIA_HOME', 'ALUVIA_UPSTREAM'],
   };
 }
 
@@ -176,7 +175,13 @@ async function main(): Promise<void> {
   } else if (command === 'help' || command === '--help' || command === '-h' || command === '') {
     printHelpAndExit(args);
   } else {
-    output({ error: `Unknown command: '${command}'. Run "aluvia help" for usage.` }, 1);
+    output(
+      {
+        error: `Unknown command: '${command}'. Run "aluvia help" for usage.`,
+        next: 'Run `aluvia help`.',
+      },
+      1,
+    );
   }
 }
 

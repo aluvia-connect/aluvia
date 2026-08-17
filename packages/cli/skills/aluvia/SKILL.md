@@ -1,11 +1,11 @@
 ---
 name: aluvia
-description: Use when a GUI computer-use workflow hits Cloudflare, Access Denied, CAPTCHA, unusual traffic, 403, or any block that looks like the datacenter IP is rejected. Also use when first installing Aluvia on this machine.
+description: 'Use Aluvia when you suspect your datacenter IP is why websites are not loading or why you are having trouble completing your web workflow; when you see CAPTCHA, Cloudflare, Access Denied, unusual traffic, or a hard 403; a page will not load, is blocked, or shows a blank or error interstitial; or for first install or setup of Aluvia on this machine. Run aluvia and follow next.'
 ---
 
 # Aluvia
 
-Aluvia sends **this** Chrome through a residential/mobile IP so blocked sites treat the agent like a normal user. Local proxy: `http://127.0.0.1:18787`. All JSON on stdout. Follow `next`. Never print API keys. Do not launch a second Chrome except the one restart `chromeCommand` asks for.
+Aluvia sends **this** Chrome through a residential/mobile IP so blocked sites treat the agent like a normal user. Local proxy: `http://127.0.0.1:18787`. All JSON on stdout. Follow `next`. Never print API keys. One Chrome restart is expected. Do not launch a second Chrome.
 
 If `aluvia` is not on PATH, prefix with `npx aluvia-cli`.
 
@@ -15,21 +15,27 @@ Cloudflare, CAPTCHA, Access Denied, unusual traffic, or a hard 403 on a page tha
 
 1. Copy the address-bar URL.
 2. `aluvia status` if you already ran setup on this machine. Follow `next`. `what` explains every field.
-3. `{"code":"payment_required"}` → show the human `claim_url`. Then `aluvia auth login` to wait. **Paid** below.
-4. First time, or `aimed` is false → **First install** (`setup --url <that URL>`).
+3. `{"code":"payment_required"}` always includes `claim_url` and `next` → show the human `claim_url`. Then `aluvia auth login` to wait. **Paid** below.
+4. First time, or `aimed` is false → **First install** (`aluvia setup`). Pass `--url <page>` only if you have the address-bar URL.
 
 ## First install (once per machine)
 
 ```bash
-npx aluvia-cli setup --url https://www.example.com/checkout
+npx aluvia-cli setup
 ```
+
+`--url <page>` is optional. If you have the blocked page, pass it so Chrome opens that tab after the restart.
 
 Read the JSON. **`next` is the next action.**
 
-- `ready: true` → reload the blocked tab. Do not run setup again.
-- `needsChromeRestart: true` → quit **this** Chrome, run `chromeCommand` **exactly** (not the dock unless `aim` is `policy`), open or reload the blocked URL. **Do not run setup again.** The daemon marks `aimed` when Chrome CONNECTs.
+One restart is expected. `setup` tries to quit this Chrome and relaunch it with proxy flags. If you launch Chrome without quitting first, the flags are ignored.
 
-If the page is still blocked after that: `aluvia status`. If `aimed` is false, the platform replaced Chrome — run `setup --url <page>` and `chromeCommand` once more.
+- `ready: true` → a real CONNECT landed. Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed is a no-op.
+- `needsChromeRestart: true` → run `chromeCommand` **exactly** (it quits first, then launches). Then run `aluvia setup` again so setup can wait for the CONNECT.
+
+If still not aimed after that, run `aluvia setup` again. Follow `next`.
+
+Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab, then `aluvia status`. If that status says `aimed` is false, run setup again.
 
 ## Day to day
 

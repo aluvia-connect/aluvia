@@ -1,20 +1,17 @@
 /**
- * MCP output capture helpers.
+ * Test output capture.
  *
- * The CLI handlers call `output()` which normally does `console.log` + `process.exit()`.
- * In MCP mode, we switch `output()` to throw an MCPOutputCapture instead,
- * allowing us to catch and return the data without exiting the process.
+ * CLI handlers call `output()` which normally does `console.log` + `process.exit()`.
+ * Tests switch `output()` to throw OutputCapture so they can read the JSON
+ * without exiting the process.
  *
- * Uses AsyncLocalStorage so concurrent MCP tool calls don't interfere.
+ * Uses AsyncLocalStorage so concurrent captures do not interfere.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-/**
- * Thrown by output() when in capture mode.
- * Contains the JSON data and exit code that would have been written to stdout.
- */
-export class MCPOutputCapture {
+/** Thrown by output() when in capture mode. */
+export class OutputCapture {
   constructor(
     public readonly data: Record<string, unknown>,
     public readonly exitCode: number,
@@ -28,9 +25,8 @@ export function isCapturing(): boolean {
 }
 
 /**
- * Run a CLI handler function in capture mode.
+ * Run a CLI handler in capture mode.
  * Returns the data that output() would have written to stdout.
- * Safe for concurrent use — each call gets its own async context.
  */
 export async function captureOutput(
   fn: () => Promise<void> | void,
@@ -38,19 +34,17 @@ export async function captureOutput(
   return captureContext.run(true, async () => {
     try {
       await fn();
-      // Handler completed without calling output() — shouldn't happen for CLI handlers
       return {
         data: { error: 'Handler did not produce output' },
         isError: true,
       };
     } catch (err) {
-      if (err instanceof MCPOutputCapture) {
+      if (err instanceof OutputCapture) {
         return {
           data: err.data,
           isError: err.exitCode !== 0,
         };
       }
-      // Unexpected error (not from output())
       return {
         data: { error: err instanceof Error ? err.message : String(err) },
         isError: true,

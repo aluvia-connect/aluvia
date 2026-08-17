@@ -1,12 +1,13 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { buildHelpJson, handleHelp } from '../src/cli.js';
-import { captureOutput } from '../src/mcp-helpers.js';
+import { captureOutput } from '../src/output-capture.js';
 
 describe('proxy help', () => {
-  test('help JSON lists every proxy verb and ALUVIA_HOME', () => {
+  test('help JSON lists every proxy verb and no env-var instructions', () => {
     const help = buildHelpJson();
     const names = help.commands.map((c) => c.command);
+    assert.ok(!('environment' in help));
     for (const verb of [
       'setup',
       'start',
@@ -41,9 +42,6 @@ describe('proxy help', () => {
       ['--url <url>'],
     );
     assert.deepStrictEqual(start?.options, []);
-    assert.ok(!help.environment.includes('ALUVIA_PROXY_PORT'));
-    assert.ok(help.environment.includes('ALUVIA_HOME'));
-    assert.ok(help.environment.includes('ALUVIA_UPSTREAM'));
   });
 
   test('help is JSON on stdout with next', async () => {
@@ -51,7 +49,12 @@ describe('proxy help', () => {
     assert.strictEqual(result.isError, false);
     assert.ok(Array.isArray(result.data.commands));
     assert.match(String(result.data.next), /Follow next/);
-    const parsed = JSON.parse(JSON.stringify(result.data)) as { next?: string };
+    const parsed = JSON.parse(JSON.stringify(result.data)) as { next?: string; environment?: unknown };
     assert.ok(typeof parsed.next === 'string');
+    assert.strictEqual(parsed.environment, undefined);
+    const helpCmd = (
+      result.data.commands as Array<{ command: string; options: Array<{ flag?: string }> }>
+    ).find((c) => c.command === 'help');
+    assert.ok(helpCmd?.options.some((o) => o.flag === '--json'));
   });
 });

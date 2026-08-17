@@ -28,7 +28,7 @@ packages/
       geos.ts             — Geo listing
       auth.ts             — auth <key> | login | status
       api-helpers.ts      — Credential resolver
-      mcp-helpers.ts      — Test output capture
+      output-capture.ts   — Test output capture (output() without process.exit)
       net/                — private internals (not a public API)
         aluvia-api.ts     — account.get / usage.get / geos.list
         config-manager.ts — connection POST/GET/PATCH, BYO upstream
@@ -36,7 +36,6 @@ packages/
         request.ts        — HTTP to api.aluvia.io
         errors.ts         — PaymentRequiredError and related
     test/                 — node:test + node:assert (tsx)
-docs/                     — Technical guides
 ```
 
 ## Key Patterns

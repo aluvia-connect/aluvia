@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PaymentRequiredError } from '../src/net/errors.js';
-import { captureOutput } from '../src/mcp-helpers.js';
+import { captureOutput } from '../src/output-capture.js';
 import { handleAuth, paymentRequiredPayload } from '../src/auth.js';
 import { resolveCredential } from '../src/api-helpers.js';
 import {
@@ -91,6 +91,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
       );
       assert.strictEqual(first.claim_url, 'https://dashboard.aluvia.io/cli-auth?cli_code=ABCD');
       assert.strictEqual(first.code, 'payment_required');
+      assert.match(String(first.next), /aluvia auth login/);
       const second = await paymentRequiredPayload(
         new PaymentRequiredError('used up', 'https://dashboard.aluvia.io/cli-auth'),
       );
@@ -173,6 +174,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
       assert.strictEqual(result.isError, true);
       assert.strictEqual(result.data.code, 'payment_required');
       assert.strictEqual(result.data.claim_url, 'https://dashboard.aluvia.io/cli-auth?cli_code=CODE1');
+      assert.match(String(result.data.next), /aluvia auth login/);
       assert.strictEqual(getStoredApiKey(), undefined);
     } finally {
       globalThis.fetch = origFetch;
@@ -273,22 +275,26 @@ describe('credential resolver', { concurrency: 1 }, () => {
     ensureInstallId();
     const trial = await captureOutput(() => handleAuth(['status']));
     assert.strictEqual(trial.isError, false);
-    assert.deepStrictEqual(trial.data, { authenticated: false, provider: 'aluvia', trial: true });
+    assert.strictEqual(trial.data.authenticated, false);
+    assert.strictEqual(trial.data.provider, 'aluvia');
+    assert.strictEqual(trial.data.trial, true);
+    assert.ok(typeof trial.data.next === 'string');
 
     saveApiKey('stored-token');
     const keyed = await captureOutput(() => handleAuth(['status']));
     assert.strictEqual(keyed.isError, false);
-    assert.deepStrictEqual(keyed.data, {
-      authenticated: true,
-      source: 'config',
-      provider: 'aluvia',
-      configFile: path.join(home!, 'config.json'),
-    });
+    assert.strictEqual(keyed.data.authenticated, true);
+    assert.strictEqual(keyed.data.source, 'config');
+    assert.strictEqual(keyed.data.provider, 'aluvia');
+    assert.strictEqual(keyed.data.configFile, path.join(home!, 'config.json'));
+    assert.ok(typeof keyed.data.next === 'string');
 
     saveUpstream('http://user:pass@byo.example:8080');
     const byo = await captureOutput(() => handleAuth(['status']));
     assert.strictEqual(byo.isError, false);
-    assert.deepStrictEqual(byo.data, { authenticated: false, provider: 'custom' });
+    assert.strictEqual(byo.data.authenticated, false);
+    assert.strictEqual(byo.data.provider, 'custom');
+    assert.ok(typeof byo.data.next === 'string');
   });
 
   function mockDeviceFlow(opts: {
@@ -343,6 +349,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
       const result = await captureOutput(() => handleAuth(['login']));
       assert.strictEqual(result.isError, true);
       assert.match(String(result.data.error), /auth login/);
+      assert.match(String(result.data.next), /auth login/);
       assert.strictEqual(getPendingCliAuth(), undefined);
     } finally {
       globalThis.fetch = origFetch;
@@ -362,6 +369,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
       assert.strictEqual(result.isError, true);
       assert.match(String(result.data.error), /Timed out/);
       assert.match(String(result.data.error), /auth login/);
+      assert.match(String(result.data.next), /auth login/);
     } finally {
       globalThis.fetch = origFetch;
     }
@@ -397,6 +405,7 @@ describe('credential resolver', { concurrency: 1 }, () => {
       const result = await captureOutput(() => handleAuth(['login']));
       assert.strictEqual(result.isError, true);
       assert.match(String(result.data.error), /Could not start authentication/);
+      assert.match(String(result.data.next), /auth login/);
       assert.ok(initBody && typeof initBody === 'object');
       assert.strictEqual((initBody as { install_id?: string }).install_id, installId);
     } finally {

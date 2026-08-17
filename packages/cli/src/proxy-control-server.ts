@@ -157,10 +157,16 @@ async function handleRequest(
     }
 
     if (method === 'POST' && pathname === '/last-connect') {
-      await readJsonBody(req);
-      const cleared: LastConnectSnapshot = { hostname: null, at: null };
-      handlers.setLastConnect?.(cleared);
-      sendJson(res, 200, cleared);
+      const body = await readJsonBody(req);
+      const snapshot: LastConnectSnapshot =
+        typeof body.hostname === 'string' || typeof body.at === 'number'
+          ? {
+              hostname: typeof body.hostname === 'string' && body.hostname.length > 0 ? body.hostname : null,
+              at: typeof body.at === 'number' && Number.isFinite(body.at) ? body.at : null,
+            }
+          : { hostname: null, at: null };
+      handlers.setLastConnect?.(snapshot);
+      sendJson(res, 200, snapshot);
       return;
     }
 

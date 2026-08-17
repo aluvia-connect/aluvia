@@ -100,6 +100,15 @@ export function writeChromeProxyPolicy(dataPort: number): PolicyWriteResult {
   return { wrote: false, path: null, mtimeMs: null };
 }
 
+export const DEFAULT_ATTACH_WAIT_MS = 30_000;
+
+export function attachWaitMs(): number {
+  const raw = (process.env.ALUVIA_ATTACH_WAIT_MS ?? '').trim();
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= 1) return n;
+  return DEFAULT_ATTACH_WAIT_MS;
+}
+
 /**
  * Wait for a GUI CONNECT that happens at or after `sinceMs`.
  * Pre-existing CONNECTs (including `curl -x` before attach started) do not count.

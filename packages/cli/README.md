@@ -9,7 +9,7 @@ The full product write-up is in the [repository README](../../README.md). The ag
 ## Install
 
 ```bash
-npx aluvia-cli setup --url https://www.example.com/checkout
+npx aluvia-cli setup
 ```
 
 Or `npm i -g aluvia-cli` and run `aluvia`. Node.js 18+.
@@ -19,7 +19,7 @@ A first setup starts a free trial. No API key. The human does not SSH or edit en
 ## Commands
 
 ```
-aluvia setup --url <page>          Start proxyd and aim the GUI browser
+aluvia setup [--url <page>]        Start proxyd and aim the GUI browser
 aluvia start                       Start the local egress daemon
 aluvia stop                        Stop the local egress daemon
 aluvia status                      Show daemon status
@@ -36,7 +36,7 @@ aluvia geos                        List available geos
 aluvia auth <key>                  Save an API key the human pasted
 aluvia auth login                  Wait until the human finishes claim_url
 aluvia auth status                 Whether you are authenticated
-aluvia help
+aluvia help [--json]               Command list as JSON
 ```
 
 `proxy-on` / `proxy-off` do not restart Chrome. Prefer `proxy-off` over `stop`. `--geo US` only when a site requires a country; omit it to use every geo.

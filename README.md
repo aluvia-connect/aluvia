@@ -24,8 +24,10 @@ Local proxy: `http://127.0.0.1:18787`. Control: `http://127.0.0.1:18788`. Every 
 Node.js 18+. If `aluvia` is not on PATH, prefix every command with `npx aluvia-cli`.
 
 ```bash
-npx aluvia-cli setup --url https://www.example.com/checkout
+npx aluvia-cli setup
 ```
+
+`--url <page>` is optional. If you have the blocked page, pass it so Chrome opens that tab after the restart.
 
 That starts the daemon, aims Chrome at `127.0.0.1:18787`, and installs the [agent skill](./skills/aluvia/SKILL.md) into `~/.agents/skills` (and other agent skill dirs if they exist).
 
@@ -35,21 +37,23 @@ A first setup starts a free trial. No API key.
 
 ## First setup
 
-Copy the blocked page's address-bar URL, then:
-
 ```bash
-aluvia setup --url https://www.example.com/checkout
+aluvia setup
 ```
+
+Or `aluvia setup --url https://www.example.com/checkout` if you copied the blocked page.
 
 Read the JSON. **`next` is the next action.**
 
 | Field | Meaning |
 | --- | --- |
-| `ready: true` | Chrome is aimed and the daemon is up. Reload the blocked tab. Do not run setup again. |
-| `needsChromeRestart: true` | Quit **this** Chrome. Run `chromeCommand` exactly. Open or reload the blocked URL. Do not run setup again. The daemon marks `aimed` when Chrome CONNECTs. |
+| `ready: true` | Chrome CONNECTed to the local proxy. Idle tabs stay aimed. Reload the blocked tab. |
+| `needsChromeRestart: true` | Run `chromeCommand` (quits Chrome first, then launches with flags). Then run `aluvia setup` again. Launching without quitting ignores flags. |
 | `code: "payment_required"` | Trial data is used up. Show the human `claim_url`, then run `aluvia auth login`. |
 
-If the page is still blocked after Chrome is aimed: `aluvia status`. If `aimed` is false, the platform replaced Chrome — run `setup --url <page>` and `chromeCommand` once more.
+One restart is expected. `setup` tries to do it. If it cannot, run `chromeCommand`, then `aluvia setup` again. Do not launch a second Chrome.
+
+Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab, then `aluvia status`. If that status says `aimed` is false, run setup again.
 
 ---
 
@@ -123,7 +127,7 @@ The status payload never includes the key.
 ## Commands
 
 ```
-aluvia setup --url <page>          Start proxyd and aim the GUI browser
+aluvia setup [--url <page>]        Start proxyd and aim the GUI browser
 aluvia start                       Start the local egress daemon
 aluvia stop                        Stop the local egress daemon
 aluvia status                      Show daemon status
@@ -154,11 +158,11 @@ aluvia help [--json]               This list (JSON with --json)
 | Field | Meaning |
 | --- | --- |
 | `next` | The next action. Follow it. |
-| `aimed` | Is Chrome sending traffic to `http://127.0.0.1:18787`? |
+| `aimed` | Has Chrome CONNECTed to `http://127.0.0.1:18787`? Idle tabs stay aimed. After `next` asks you to reload, the next status/setup requires a CONNECT since that ask. |
 | `egress` | `aluvia` = mobile/residential IP. `direct` = this VM datacenter IP. |
 | `ready` | Aimed and the daemon is up. Reload the tab. |
 | `healthy` | The local proxy process is accepting connections. |
-| `needsChromeRestart` | `true` means quit Chrome and run `chromeCommand`. After that it stays false. |
+| `needsChromeRestart` | `true` means quit Chrome and run `chromeCommand`. `false` while aimed. |
 | `rules` | `["*"]` = all hosts through Aluvia. `[]` = all hosts direct. |
 | `targetGeo` | Pinned country code, or `null` for all geos. |
 | `what` | One-line explanation of each of the fields above. |
@@ -180,17 +184,7 @@ aluvia help [--json]               This list (JSON with --json)
 
 Chrome always talks to the loopback proxy once it is aimed. The daemon decides per-request whether to send that traffic through Aluvia (or a BYO proxy) or out of the VM directly.
 
-State lives under `ALUVIA_HOME`: `/workspace/.aluvia` when `/workspace` exists, otherwise `~/.aluvia`. That directory holds `config.json`, `install_id`, `proxy.json`, and logs.
-
-Optional overrides (not the agent path — agents run `aluvia auth` / `aluvia proxy-provider`):
-
-| Variable | Role |
-| --- | --- |
-| `ALUVIA_API_KEY` | API key override |
-| `ALUVIA_UPSTREAM` | BYO proxy URL override |
-| `ALUVIA_HOME` | Config directory |
-
-Do not point a BYO URL at the local daemon — that loops.
+State lives under `/workspace/.aluvia` when `/workspace` exists, otherwise `~/.aluvia` (`config.json`, `install_id`, `proxy.json`, logs). Persist credentials with `aluvia auth` and `aluvia proxy-provider`. Do not point a BYO URL at the local daemon — that loops.
 
 ---
 
@@ -219,7 +213,7 @@ npm test
 npm run lint
 ```
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) and [Claude.md](./Claude.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md) and [CLAUDE.md](./CLAUDE.md).
 
 ---
 

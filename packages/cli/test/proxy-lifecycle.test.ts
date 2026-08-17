@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
-import { captureOutput } from '../src/mcp-helpers.js';
+import { captureOutput } from '../src/output-capture.js';
 import { handleProxy } from '../src/proxy.js';
 import { defaultAttach, readProxyJson, writeProxyJson, type ProxyJson } from '../src/proxy-state.js';
 import { createMockAluviaApi } from './helpers/mock-aluvia-api.js';
@@ -155,6 +155,8 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
   test('start writes proxy.json + proxy.log under ALUVIA_HOME', async () => {
     const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
     assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.ok(typeof result.data.next === 'string');
+    assert.ok(result.data.what);
     assert.strictEqual(fs.existsSync(path.join(home, 'proxy.json')), true);
     assert.strictEqual(fs.existsSync(path.join(home, 'proxy.log')), true);
     const state = readProxyJson();
@@ -215,9 +217,10 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     const first = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
     assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
     const second = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
-    assert.strictEqual(second.isError, true);
-    assert.strictEqual(second.data.error, 'proxyd already running');
+    assert.strictEqual(second.isError, false, String(second.data.error ?? ''));
+    assert.strictEqual(second.data.error, undefined);
     assert.ok(typeof second.data.proxyUrl === 'string');
+    assert.match(String(second.data.next), /already running/);
   });
 
   test('stale pid', async () => {
@@ -261,9 +264,24 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.ok(typeof status.data.controlUrl === 'string');
     assert.ok(typeof status.data.next === 'string');
     assert.ok(status.data.next.length > 0);
-    const what = status.data.what as { aimed?: string; egress?: string } | undefined;
-    assert.ok(typeof what?.aimed === 'string');
-    assert.ok(typeof what?.egress === 'string');
+    const what = status.data.what as {
+      next?: string;
+      aimed?: string;
+      egress?: string;
+      ready?: string;
+      healthy?: string;
+      needsChromeRestart?: string;
+      rules?: string;
+      targetGeo?: string;
+    };
+    assert.ok(typeof what.next === 'string');
+    assert.ok(typeof what.aimed === 'string');
+    assert.ok(typeof what.egress === 'string');
+    assert.ok(typeof what.ready === 'string');
+    assert.ok(typeof what.healthy === 'string');
+    assert.ok(typeof what.needsChromeRestart === 'string');
+    assert.ok(typeof what.rules === 'string');
+    assert.ok(typeof what.targetGeo === 'string');
   });
 
   test('stop then status', async () => {
@@ -290,7 +308,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
     assert.strictEqual(status.data.healthy, false);
     assert.ok(typeof status.data.next === 'string');
-    assert.match(String(status.data.next), /setup --url/);
+    assert.match(String(status.data.next), /aluvia setup/);
     assert.ok(status.data.what);
   });
 
@@ -311,6 +329,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
         method: 'flags',
         expectConnectAfter: Date.now(),
       },
+      lastConnect: { hostname: 'verify.example', at: Date.now() },
     });
     const status = await captureOutput(() => handleProxy(['status']));
     assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
@@ -318,6 +337,33 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(status.data.egress, 'aluvia');
     assert.match(String(status.data.next), /aluvia start/);
     assert.match(String(status.data.next), /Do not quit Chrome/);
+  });
+
+  test('status stays aimed when the last CONNECT is 90s old and no probe is pending', async () => {
+    writeProxyJson({
+      pid: 999999993,
+      ready: false,
+      dataPort,
+      controlPort,
+      proxyUrl: `http://127.0.0.1:${dataPort}`,
+      controlUrl: `http://127.0.0.1:${controlPort}`,
+      connectionId: 3449,
+      sessionId: 'dddddddddddddddddddddddddddddddd',
+      targetGeo: null,
+      rules: ['*'],
+      attach: {
+        status: 'verified',
+        method: 'flags',
+        expectConnectAfter: Date.now() - 120_000,
+        reloadAskedAt: null,
+      },
+      lastConnect: { hostname: 'verify.example', at: Date.now() - 90_000 },
+    });
+    const status = await captureOutput(() => handleProxy(['status']));
+    assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
+    assert.strictEqual(status.data.aimed, true);
+    assert.strictEqual(status.data.needsChromeRestart, false);
+    assert.match(String(status.data.next), /aluvia start/);
   });
 
   test('stop when already dead', async () => {
@@ -330,7 +376,8 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
 
     const stopped = await captureOutput(() => handleProxy(['stop']));
     assert.strictEqual(stopped.isError, false);
-    assert.deepStrictEqual(stopped.data, { status: 'stopped' });
+    assert.strictEqual(stopped.data.status, 'stopped');
+    assert.ok(typeof stopped.data.next === 'string');
     const after = readProxyJson();
     assert.ok(after);
     assert.strictEqual(after.pid, null);

@@ -15,8 +15,8 @@ See **CLAUDE.md** for architecture, workspace layout, and key patterns.
 
 ```bash
 # Clone and install
-git clone https://github.com/aluvia-connect/sdk-node.git
-cd sdk-node
+git clone https://github.com/aluvia-connect/aluvia.git
+cd aluvia
 npm ci
 ```
 
@@ -69,7 +69,7 @@ For breaking changes, add `!` after the type/scope and a `BREAKING CHANGE:` foot
 ## Security
 
 - Never commit secrets (API keys, passwords, tokens).
-- Use environment variables for sensitive values.
+- Persist keys with `aluvia auth <key>`. Never print them.
 - Report vulnerabilities privately (see `SECURITY.md`).
 
 ## Questions?

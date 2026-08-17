@@ -8,8 +8,10 @@ import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
   defaultAttach,
+  defaultLastConnect,
   egressFromRules,
   normalizeAttach,
+  normalizeLastConnect,
   readProxyJson,
   writeProxyJson,
   type LastConnectSnapshot,
@@ -93,7 +95,9 @@ export async function handleProxyDaemon(args: string[]): Promise<void> {
     };
   }
   if (!apiKey && !installId && !upstream) {
-    throw new Error('No API key found. Run `aluvia auth` to log in, or set ALUVIA_API_KEY.');
+    throw new Error(
+      'No credentials. Run `aluvia setup` to start a trial, or `aluvia auth <key>` if the human pasted a key.',
+    );
   }
 
   const apiBaseUrl = (process.env.ALUVIA_API_BASE_URL ?? '').trim() || undefined;
@@ -151,7 +155,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
 
   const proxy = new ProxyServer(config, { logLevel: 'info' });
 
-  let lastConnect: LastConnectSnapshot = { hostname: null, at: null };
+  let lastConnect: LastConnectSnapshot = normalizeLastConnect(existing?.lastConnect);
   proxy.setRequestObserver((hostname) => {
     if (isLoopbackHostname(hostname)) return;
     lastConnect = { hostname, at: Date.now() };
@@ -167,8 +171,8 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
         method: attach.method ?? 'flags',
         expectConnectAfter: expectAfter,
       };
-      persist(true);
     }
+    persist(true);
   });
 
   const persist = (ready: boolean): void => {
@@ -185,6 +189,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       targetGeo: netState.targetGeo,
       rules: netState.rules,
       attach,
+      lastConnect,
     };
     writeProxyJson(data);
   };
@@ -201,6 +206,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     targetGeo: existing?.targetGeo ?? null,
     rules: existing?.rules ?? [],
     attach,
+    lastConnect,
   });
 
   const failState = (error: string, code?: string | null, claimUrl?: string | null): ProxyJson => ({
@@ -215,6 +221,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     targetGeo: existing?.targetGeo ?? null,
     rules: existing?.rules ?? [],
     attach,
+    lastConnect,
     error,
     code: code ?? null,
     claimUrl: claimUrl ?? null,
@@ -267,6 +274,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       targetGeo: netState.targetGeo ?? existing?.targetGeo ?? null,
       rules: netState.rules,
       attach,
+      lastConnect,
     });
     process.exit(0);
   };
@@ -331,7 +339,8 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     },
     getLastConnect: () => lastConnect,
     setLastConnect: (snapshot) => {
-      lastConnect = snapshot;
+      lastConnect = snapshot ?? defaultLastConnect();
+      persist(true);
     },
     setAttach: (next) => {
       attach = next;

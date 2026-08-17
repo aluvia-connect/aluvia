@@ -24,6 +24,8 @@ export type ProxyAttachState = {
   method: AttachMethod;
   /** Only CONNECTs at or after this timestamp can mark attach verified. */
   expectConnectAfter: number | null;
+  /** When set, the next status/setup requires a CONNECT after this time. */
+  reloadAskedAt: number | null;
 };
 
 export type ProxyJson = {
@@ -38,6 +40,7 @@ export type ProxyJson = {
   targetGeo: string | null;
   rules: string[];
   attach: ProxyAttachState;
+  lastConnect: LastConnectSnapshot;
   error?: string | null;
   code?: string | null;
   claimUrl?: string | null;
@@ -48,7 +51,64 @@ export function defaultAttach(): ProxyAttachState {
     status: 'needs_ui',
     method: null,
     expectConnectAfter: null,
+    reloadAskedAt: null,
   };
+}
+
+export function defaultLastConnect(): LastConnectSnapshot {
+  return { hostname: null, at: null };
+}
+
+export function normalizeLastConnect(raw: unknown): LastConnectSnapshot {
+  if (!raw || typeof raw !== 'object') return defaultLastConnect();
+  const value = raw as Record<string, unknown>;
+  const hostname = typeof value.hostname === 'string' && value.hostname.length > 0 ? value.hostname : null;
+  const at = typeof value.at === 'number' && Number.isFinite(value.at) ? value.at : null;
+  return { hostname, at };
+}
+
+function hasConnect(lastConnect: LastConnectSnapshot | undefined): boolean {
+  return Boolean(lastConnect?.hostname && lastConnect.at != null);
+}
+
+/** Verified attach plus at least one non-loopback CONNECT. Idle tabs stay aimed. */
+export function isLiveAim(
+  attach: ProxyAttachState | undefined,
+  lastConnect: LastConnectSnapshot | undefined,
+): boolean {
+  return attach?.status === 'verified' && hasConnect(lastConnect);
+}
+
+export function resolveAimProbe(
+  attach: ProxyAttachState,
+  lastConnect: LastConnectSnapshot | undefined,
+): { aimed: boolean; attach: ProxyAttachState; failed: boolean } {
+  const normalized = normalizeAttach(attach);
+  if (normalized.status !== 'verified' || !hasConnect(lastConnect)) {
+    return { aimed: false, attach: normalized, failed: false };
+  }
+  const stamp = normalized.reloadAskedAt;
+  if (stamp == null) {
+    return { aimed: true, attach: normalized, failed: false };
+  }
+  const at = lastConnect!.at!;
+  if (at > stamp) {
+    return { aimed: true, attach: { ...normalized, reloadAskedAt: null }, failed: false };
+  }
+  return {
+    aimed: false,
+    attach: {
+      status: 'needs_ui',
+      method: normalized.method,
+      expectConnectAfter: stamp,
+      reloadAskedAt: null,
+    },
+    failed: true,
+  };
+}
+
+export function nextAsksReload(next: string): boolean {
+  return /\breload\b/i.test(next);
 }
 
 export function normalizeAttach(raw: unknown): ProxyAttachState {
@@ -61,7 +121,11 @@ export function normalizeAttach(raw: unknown): ProxyAttachState {
     typeof value.expectConnectAfter === 'number' && Number.isFinite(value.expectConnectAfter)
       ? value.expectConnectAfter
       : null;
-  return { status, method, expectConnectAfter };
+  const reloadAskedAt =
+    typeof value.reloadAskedAt === 'number' && Number.isFinite(value.reloadAskedAt)
+      ? value.reloadAskedAt
+      : null;
+  return { status, method, expectConnectAfter, reloadAskedAt };
 }
 
 export function proxyJsonPath(): string {
@@ -72,7 +136,11 @@ export function readProxyJson(): ProxyJson | null {
   try {
     const parsed = JSON.parse(fs.readFileSync(proxyJsonPath(), 'utf8')) as ProxyJson;
     if (!parsed || typeof parsed !== 'object') return null;
-    return { ...parsed, attach: normalizeAttach(parsed.attach) };
+    return {
+      ...parsed,
+      attach: normalizeAttach(parsed.attach),
+      lastConnect: normalizeLastConnect(parsed.lastConnect),
+    };
   } catch {
     return null;
   }

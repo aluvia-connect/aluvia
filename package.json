@@ -7,11 +7,11 @@
   "author": "Aluvia",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aluvia-connect/sdk-node.git"
+    "url": "git+https://github.com/aluvia-connect/aluvia.git"
   },
   "homepage": "https://aluvia.io",
   "bugs": {
-    "url": "https://github.com/aluvia-connect/sdk-node/issues"
+    "url": "https://github.com/aluvia-connect/aluvia/issues"
   },
   "type": "module",
   "workspaces": [

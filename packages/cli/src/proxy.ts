@@ -9,16 +9,22 @@ import { clearUpstream, getStoredUpstream, parseUpstreamUrl, saveUpstream } from
 import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
 import { configDir } from './config.js';
-import { chromeRestartCommand } from './chrome-launch.js';
-import { waitForExternalConnect, writeChromeProxyPolicy } from './proxy-attach.js';
+import { chromeRestartCommand, tryRestartChrome } from './chrome-launch.js';
+import { attachWaitMs, waitForExternalConnect, writeChromeProxyPolicy } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
 import { installProxySkill } from './proxy-skill.js';
 import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
   egressFromRules,
+  isLiveAim,
+  nextAsksReload,
+  normalizeAttach,
+  normalizeLastConnect,
   readProxyJson,
+  resolveAimProbe,
   writeProxyJson,
+  type LastConnectSnapshot,
   type ProxyAttachState,
   type ProxyEgress,
   type ProxyJson,
@@ -70,25 +76,12 @@ function parseUrlFlag(
 
 function parseRestoreUrl(args: string[]): string | null {
   const parsed = parseUrlFlag(args);
-  return parsed.specified ? parsed.url : null;
-}
-
-function requireSetupUrl(args: string[]): string {
-  const parsed = parseUrlFlag(args);
-  if (!parsed.specified || parsed.raw == null) {
-    output(
-      {
-        error: 'Usage: aluvia setup --url <page>',
-        next: 'Pass the blocked page URL from the address bar.',
-      },
-      1,
-    );
-  }
+  if (!parsed.specified) return null;
   if (!parsed.url) {
     output(
       {
-        error: `Invalid --url: '${parsed.raw}'. Use an http(s) page URL.`,
-        next: 'Pass the blocked page URL from the address bar.',
+        error: `Invalid --url: '${parsed.raw ?? ''}'. Use an http(s) page URL.`,
+        next: 'Omit --url, or pass a blocked page URL from the address bar.',
       },
       1,
     );
@@ -124,15 +117,26 @@ function isLive(state: ProxyJson | null): state is ProxyJson {
 }
 
 function aimedFrom(state: ProxyJson | null): boolean {
-  return state?.attach.status === 'verified';
+  return isLiveAim(state?.attach, state?.lastConnect);
+}
+
+async function readLastConnect(): Promise<LastConnectSnapshot> {
+  try {
+    const res = await controlRequest('GET', '/last-connect');
+    return normalizeLastConnect(res.json);
+  } catch {
+    return normalizeLastConnect(readProxyJson()?.lastConnect);
+  }
 }
 
 const STATUS_WHAT = {
-  aimed: 'Is Chrome sending traffic to the local proxy (http://127.0.0.1:18787)?',
+  next: 'The next action. Follow it.',
+  aimed:
+    'Has Chrome CONNECTed to the local proxy? Idle tabs stay aimed. After next asks you to reload, the following status/setup checks for a CONNECT since that ask.',
   egress: 'aluvia = mobile/residential IP. direct = this VM datacenter IP.',
   ready: 'aimed and the daemon is up. Reload the tab.',
   healthy: 'The local proxy process is accepting connections.',
-  needsChromeRestart: 'true means quit Chrome and run chromeCommand. After that it stays false.',
+  needsChromeRestart: 'true means run chromeCommand (quit then launch). Then run aluvia setup again.',
   rules: '["*"] = all hosts through Aluvia. [] = all hosts direct.',
   targetGeo: 'Pinned country code, or null for all geos.',
 };
@@ -147,22 +151,22 @@ function statusNext(opts: {
   if (!opts.live) {
     if (opts.aimed) {
       return {
-        next: 'Chrome is aimed at the proxy but the daemon is down. Run `aluvia start` or `aluvia setup --url <page>`. Do not quit Chrome.',
+        next: 'Chrome is aimed at the proxy but the daemon is down. Run `aluvia start` or `aluvia setup`. Do not quit Chrome.',
       };
     }
-    return { next: 'Daemon is not running. Run `aluvia setup --url <blocked page>`.' };
+    return { next: 'Daemon is not running. Run `aluvia setup`.' };
   }
   if (!opts.healthy) {
     if (opts.aimed) {
       return {
-        next: 'Chrome is aimed at the proxy but the daemon is down. Run `aluvia start` or `aluvia setup --url <page>`. Do not quit Chrome.',
+        next: 'Chrome is aimed at the proxy but the daemon is down. Run `aluvia start` or `aluvia setup`. Do not quit Chrome.',
       };
     }
-    return { next: 'Daemon is not healthy. Run `aluvia setup --url <blocked page>`.' };
+    return { next: 'Daemon is not healthy. Run `aluvia setup`.' };
   }
   if (!opts.aimed) {
     return {
-      next: 'Chrome is not sending traffic to the local proxy. Quit this Chrome. Run chromeCommand. Open or reload the blocked tab. Do not run setup again.',
+      next: 'Chrome is not aimed. Run chromeCommand (it quits Chrome first; launching without quitting ignores flags). Then run `aluvia setup` again.',
       chromeCommand: chromeRestartCommand(opts.dataPort),
     };
   }
@@ -223,11 +227,19 @@ async function failIfDaemonDied(logFile: string): Promise<never> {
         ...(dead.code ? { code: dead.code } : {}),
         ...(dead.claimUrl ? { claim_url: dead.claimUrl } : {}),
         logFile,
+        next: 'Run `aluvia status`. If you see payment_required, show claim_url then `aluvia auth login`.',
       },
       1,
     );
   }
-  output({ error: 'proxyd process exited unexpectedly.', logFile }, 1);
+  output(
+    {
+      error: 'proxyd process exited unexpectedly.',
+      logFile,
+      next: 'Run `aluvia status` or `aluvia setup`.',
+    },
+    1,
+  );
 }
 
 function portBusy(port: number): Promise<boolean> {
@@ -279,10 +291,16 @@ function clearPidReady(state: ProxyJson): void {
 
 function failControl(err: unknown): never {
   if (isControlClientError(err, 'not_running')) {
-    output({ error: NOT_RUNNING }, 1);
+    output(
+      {
+        error: NOT_RUNNING,
+        next: 'Run `aluvia start` if Chrome is already aimed, or `aluvia setup`.',
+      },
+      1,
+    );
   }
   if (isControlClientError(err, 'timeout')) {
-    output({ error: CONTROL_TIMEOUT }, 1);
+    output({ error: CONTROL_TIMEOUT, next: 'Run `aluvia status`.' }, 1);
   }
   throw err;
 }
@@ -299,10 +317,22 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
   const existing = readProxyJson();
 
   if (await portBusy(dataPort)) {
-    output({ error: `port ${dataPort} in use` }, 1);
+    output(
+      {
+        error: `port ${dataPort} in use`,
+        next: 'Run `aluvia status`. If the daemon is dead, stop whatever is bound to that port and retry.',
+      },
+      1,
+    );
   }
   if (await portBusy(controlPort)) {
-    output({ error: `port ${controlPort} in use` }, 1);
+    output(
+      {
+        error: `port ${controlPort} in use`,
+        next: 'Run `aluvia status`. If the daemon is dead, stop whatever is bound to that port and retry.',
+      },
+      1,
+    );
   }
 
   const connectionId = flagConnectionId ?? existing?.connectionId ?? undefined;
@@ -364,7 +394,7 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
             const healthy = await bothPortsAccept(state);
             try {
               const { json } = await controlRequest('GET', '/status');
-              resolve({ json, healthy });
+              resolve({ json: { ...statusFields(state, healthy), ...json, healthy }, healthy });
             } catch {
               resolve({ json: statusFields(state, healthy), healthy });
             }
@@ -375,7 +405,10 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
             clearInterval(poll);
             const alive = child.pid ? isProcessAlive(child.pid) : false;
             if (!alive) await failIfDaemonDied(logFile);
-            output({ error: 'proxyd is still initializing (timeout).', logFile }, 1);
+            output(
+              { error: 'proxyd is still initializing (timeout).', logFile, next: 'Run `aluvia status`.' },
+              1,
+            );
           }
         } catch (err) {
           clearInterval(poll);
@@ -391,18 +424,29 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
 async function handleStart(args: string[]): Promise<void> {
   const existing = readProxyJson();
   if (isLive(existing)) {
+    const keepGoing = 'Daemon is already running. Run `aluvia status` or keep going.';
+    const notHealthy = 'Daemon is up but not healthy. Run `aluvia status`.';
     try {
       const { json } = await controlRequest('GET', '/status');
+      const lastConnect = await readLastConnect();
       const healthy = await bothPortsAccept(existing);
-      output({ ...json, healthy, error: 'proxyd already running' }, 1);
+      const fields = statusFields({ ...existing, lastConnect }, healthy);
+      if (healthy) {
+        output({ ...fields, ...json, healthy: true, next: keepGoing });
+      }
+      output({ ...fields, ...json, healthy: false, error: 'proxyd already running', next: notHealthy }, 1);
     } catch {
       const healthy = await bothPortsAccept(existing).catch(() => false);
-      output({ ...statusFields(existing, healthy), error: 'proxyd already running' }, 1);
+      const fields = statusFields(existing, healthy);
+      if (healthy) {
+        return outputMaybeStamp({ ...fields, next: keepGoing });
+      }
+      output({ ...fields, error: 'proxyd already running', next: notHealthy }, 1);
     }
   }
 
   const started = await startDaemon(args);
-  output({ ...started.json, healthy: started.healthy });
+  return outputMaybeStamp({ ...started.json, healthy: started.healthy });
 }
 
 type AttachOutcome = {
@@ -417,12 +461,42 @@ type AttachOutcome = {
 };
 
 async function persistAttach(attach: ProxyAttachState): Promise<void> {
+  const next = normalizeAttach(attach);
+  const state = readProxyJson();
+  if (!state || !isLive(state)) {
+    if (state) writeProxyJson({ ...state, attach: next });
+    return;
+  }
   try {
-    const res = await controlRequest('POST', '/attach-state', attach);
-    if (res.status !== 200) output({ error: String(res.json.error ?? 'attach-state failed') }, 1);
+    const res = await controlRequest('POST', '/attach-state', next);
+    if (res.status !== 200) {
+      output(
+        {
+          error: String(res.json.error ?? 'attach-state failed'),
+          next: 'Run `aluvia status`. If the daemon is down, run `aluvia start` or `aluvia setup`.',
+        },
+        1,
+      );
+    }
   } catch (err) {
     failControl(err);
   }
+}
+
+async function stampReloadAsk(): Promise<void> {
+  const state = readProxyJson();
+  if (!state || state.attach.status !== 'verified' || state.attach.reloadAskedAt != null) return;
+  const last = isLive(state) ? await readLastConnect() : state.lastConnect;
+  if (!isLiveAim(state.attach, last)) return;
+  await persistAttach({ ...normalizeAttach(state.attach), reloadAskedAt: Date.now() });
+}
+
+async function outputMaybeStamp(data: Record<string, unknown>, exitCode = 0): Promise<never> {
+  const next = typeof data.next === 'string' ? data.next : '';
+  if (exitCode === 0 && nextAsksReload(next) && data.aimed !== false) {
+    await stampReloadAsk();
+  }
+  return output(data, exitCode);
 }
 
 async function runAttach(args: string[]): Promise<AttachOutcome> {
@@ -432,7 +506,13 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
 
   const state = readProxyJson();
   if (!isLive(state)) {
-    output({ error: NOT_RUNNING }, 1);
+    output(
+      {
+        error: NOT_RUNNING,
+        next: 'Run `aluvia start` if Chrome is already aimed, or `aluvia setup`.',
+      },
+      1,
+    );
   }
 
   const dataPort = state.dataPort;
@@ -440,20 +520,55 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
   const aim: 'policy' | 'flags' = policy.path ? 'policy' : 'flags';
   const persistLimit =
     aim === 'flags'
-      ? 'If the platform replaces this Chrome without flags, aim is gone. Run `aluvia status`; if aimed is false, run setup --url <page> and chromeCommand again.'
+      ? 'If the platform replaces this Chrome without flags, aim is gone. Run `aluvia status`; if aimed is false, run `aluvia setup` and chromeCommand again.'
       : undefined;
 
   const restoreUrl = parseRestoreUrl(args);
   const chromeCommand = chromeRestartCommand(dataPort, restoreUrl);
+  const lastConnect = await readLastConnect();
+  const probe = resolveAimProbe(state.attach, lastConnect);
+  if (
+    probe.attach.status !== state.attach.status ||
+    probe.attach.reloadAskedAt !== state.attach.reloadAskedAt
+  ) {
+    await persistAttach(probe.attach);
+  }
 
-  const expectConnectAfter = Date.now();
-  await persistAttach({
-    status: 'needs_ui',
-    method: null,
-    expectConnectAfter,
-  });
+  if (probe.aimed && !probe.failed) {
+    const method = probe.attach.method ?? aim;
+    await persistAttach({
+      ...probe.attach,
+      status: 'verified',
+      method,
+    });
+    return {
+      status: 'verified',
+      method,
+      aim,
+      proxyUrl: state.proxyUrl,
+      policyPath: policy.path,
+      chromeCommand,
+      restoreUrl,
+      ...(persistLimit ? { persistLimit } : {}),
+    };
+  }
 
-  const timeoutMs = Number(process.env.ALUVIA_ATTACH_WAIT_MS) || 1_000;
+  const timeoutMs = attachWaitMs();
+  const waitForPriorLaunch =
+    !probe.failed && state.attach.status === 'needs_ui' && state.attach.expectConnectAfter != null;
+
+  let expectConnectAfter = state.attach.expectConnectAfter ?? Date.now();
+  if (!waitForPriorLaunch) {
+    expectConnectAfter = Date.now();
+    await persistAttach({
+      status: 'needs_ui',
+      method: null,
+      expectConnectAfter,
+      reloadAskedAt: null,
+    });
+    await tryRestartChrome(dataPort, restoreUrl);
+  }
+
   const seen = await waitForExternalConnect({ timeoutMs, sinceMs: expectConnectAfter });
   const verifiedNow = seen || readProxyJson()?.attach.status === 'verified';
 
@@ -462,6 +577,7 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
       status: 'verified',
       method: aim,
       expectConnectAfter,
+      reloadAskedAt: null,
     };
     await persistAttach(attach);
     return {
@@ -504,9 +620,9 @@ function attachPublicFields(result: AttachOutcome): Record<string, unknown> {
 
 function setupNext(ready: boolean): string {
   if (ready) {
-    return 'Chrome is aimed. Reload the tab. Use `aluvia proxy-off` to go direct and `aluvia proxy-on` to use Aluvia again. Do not restart Chrome.';
+    return 'Chrome is aimed. Reload the tab. Use `aluvia proxy-off` to go direct and `aluvia proxy-on` to use Aluvia again. If still blocked, run `aluvia status`. If aimed is false, run `aluvia setup` again.';
   }
-  return 'Quit this Chrome. Run chromeCommand. Open or reload the blocked tab. Do not run setup again. If still blocked, run `aluvia status`. If aimed is false, run setup --url <that page> and chromeCommand again.';
+  return 'Run chromeCommand (it quits Chrome first, then launches with proxy flags). If you launch without quitting, flags are ignored. Then run `aluvia setup` again so setup can wait for the CONNECT.';
 }
 
 async function failIfPaymentRequired(res: { status: number; json: Record<string, unknown> }): Promise<void> {
@@ -522,7 +638,13 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
     const res = await controlRequest('POST', on ? '/proxy-on' : '/proxy-off', {});
     await failIfPaymentRequired(res);
     if (res.status !== 200) {
-      output({ error: String(res.json.error ?? (on ? 'proxy-on failed' : 'proxy-off failed')) }, 1);
+      output(
+        {
+          error: String(res.json.error ?? (on ? 'proxy-on failed' : 'proxy-off failed')),
+          next: 'Run `aluvia status`.',
+        },
+        1,
+      );
     }
     return {
       egress: res.json.egress === 'aluvia' ? 'aluvia' : 'direct',
@@ -534,7 +656,7 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
 }
 
 async function handleSetup(args: string[]): Promise<void> {
-  requireSetupUrl(args);
+  parseRestoreUrl(args);
   const skill = installProxySkill();
   const result = await runAttach(args);
   await postEgress(true);
@@ -550,7 +672,7 @@ async function handleSetup(args: string[]): Promise<void> {
   }
   const ready = result.status === 'verified' && healthy;
   const skillPath = skill.skillPaths[0] ?? null;
-  output({
+  return outputMaybeStamp({
     next: setupNext(ready),
     skillPath,
     ...statusJson,
@@ -605,11 +727,15 @@ async function stopDaemonProcess(): Promise<ProxyJson | null> {
 async function handleStop(): Promise<void> {
   const existing = await stopDaemonProcess();
   if (!existing) {
-    output({ status: 'stopped' });
+    output({
+      status: 'stopped',
+      next: 'Daemon is stopped. Run `aluvia setup` to start it.',
+    });
   }
   output({
     status: 'stopped',
     warning: `Chrome is still aimed at ${existing.proxyUrl}. Browsing will fail until you run \`aluvia start\` or \`aluvia setup\`. Prefer \`aluvia proxy-off\` to stay on the datacenter IP without killing the daemon.`,
+    next: 'Daemon is stopped. Chrome aimed at 18787 will fail. Run `aluvia start` or `aluvia setup`. Prefer `aluvia proxy-off` next time.',
   });
 }
 
@@ -634,13 +760,36 @@ async function handleStatus(): Promise<void> {
   try {
     const { json } = await controlRequest('GET', '/status');
     const healthy = state ? await bothPortsAccept(state) : false;
-    output(state ? { ...statusFields(state, healthy), ...json, healthy } : { ...json, healthy });
+    const lastConnect = await readLastConnect();
+    const base = state ? { ...state, lastConnect } : null;
+    const probe = base ? resolveAimProbe(base.attach, lastConnect) : null;
+    if (
+      base &&
+      probe &&
+      (probe.attach.reloadAskedAt !== base.attach.reloadAskedAt || probe.attach.status !== base.attach.status)
+    ) {
+      await persistAttach(probe.attach);
+    }
+    const aimedState = base && probe ? { ...base, attach: probe.attach, lastConnect } : base;
+    return outputMaybeStamp(
+      aimedState ? { ...statusFields(aimedState, healthy), ...json, healthy } : { ...json, healthy },
+    );
   } catch (err) {
     if (isControlClientError(err, 'not_running')) {
       if (state) {
-        output(statusFields(state, false));
+        const probe = resolveAimProbe(state.attach, state.lastConnect);
+        if (probe.attach.reloadAskedAt !== state.attach.reloadAskedAt || probe.failed) {
+          writeProxyJson({ ...state, attach: probe.attach });
+        }
+        return outputMaybeStamp(statusFields({ ...state, attach: probe.attach }, false));
       }
-      output({ error: NOT_RUNNING }, 1);
+      output(
+        {
+          error: NOT_RUNNING,
+          next: 'Run `aluvia start` if Chrome is already aimed, or `aluvia setup`.',
+        },
+        1,
+      );
     }
     failControl(err);
   }
@@ -649,11 +798,23 @@ async function handleStatus(): Promise<void> {
 async function requireHealthyDaemon(): Promise<void> {
   const state = readProxyJson();
   if (!state || state.pid == null || !isProcessAlive(state.pid)) {
-    output({ error: NOT_RUNNING }, 1);
+    output(
+      {
+        error: NOT_RUNNING,
+        next: 'Run `aluvia start` if Chrome is already aimed, or `aluvia setup`.',
+      },
+      1,
+    );
   }
   const healthy = await bothPortsAccept(state);
   if (!healthy) {
-    output({ error: 'proxyd data port is not healthy. Run `aluvia status`.' }, 1);
+    output(
+      {
+        error: 'proxyd data port is not healthy. Run `aluvia status`.',
+        next: 'Run `aluvia status`.',
+      },
+      1,
+    );
   }
 }
 
@@ -713,7 +874,9 @@ async function postSetGeo(geo: string | null): Promise<string | null> {
   try {
     const res = await controlRequest('POST', '/set-geo', geo == null ? { clear: true } : { geo });
     await failIfPaymentRequired(res);
-    if (res.status !== 200) output({ error: String(res.json.error ?? 'set-geo failed') }, 1);
+    if (res.status !== 200) {
+      output({ error: String(res.json.error ?? 'set-geo failed'), next: 'Run `aluvia status`.' }, 1);
+    }
     return typeof res.json.targetGeo === 'string' ? res.json.targetGeo : null;
   } catch (err) {
     failControl(err);
@@ -724,7 +887,9 @@ async function postRotate(): Promise<{ sessionId: string; connectionId: unknown 
   try {
     const res = await controlRequest('POST', '/rotate-ip', {});
     await failIfPaymentRequired(res);
-    if (res.status !== 200) output({ error: String(res.json.error ?? 'rotate-ip failed') }, 1);
+    if (res.status !== 200) {
+      output({ error: String(res.json.error ?? 'rotate-ip failed'), next: 'Run `aluvia status`.' }, 1);
+    }
     return { sessionId: String(res.json.sessionId ?? ''), connectionId: res.json.connectionId };
   } catch (err) {
     failControl(err);
@@ -734,7 +899,7 @@ async function postRotate(): Promise<{ sessionId: string; connectionId: unknown 
 async function handleProxySwitch(on: boolean): Promise<void> {
   await requireHealthyDaemon();
   const result = await postEgress(on);
-  output({
+  return outputMaybeStamp({
     egress: result.egress,
     rules: result.rules,
     count: result.rules.length,
@@ -747,13 +912,13 @@ async function handleProxyOn(args: string[]): Promise<void> {
   await requireHealthyDaemon();
   const byo = resolveCredential().kind === 'byo';
   if (geoFlag.specified && byo) {
-    output({ error: BYO_NETWORK }, 1);
+    output({ error: BYO_NETWORK, next: 'Run `aluvia proxy-provider aluvia`, then retry.' }, 1);
   }
   const before = await readControlStatus();
   const geo = desiredGeo(geoFlag, before.targetGeo, byo);
   const geoSame = before.targetGeo === geo;
   if (before.egress === 'aluvia' && geoSame) {
-    output({
+    return outputMaybeStamp({
       egress: 'aluvia',
       rules: before.rules,
       count: before.rules.length,
@@ -781,7 +946,7 @@ async function handleProxyOn(args: string[]): Promise<void> {
   }
 
   const after = await readControlStatus();
-  output({
+  return outputMaybeStamp({
     egress: 'aluvia',
     rules: after.rules,
     count: after.rules.length,
@@ -795,7 +960,7 @@ async function handleProxyOn(args: string[]): Promise<void> {
 async function handleRotateIp(args: string[]): Promise<void> {
   const geoFlag = parseGeoFlag(args);
   if (resolveCredential().kind === 'byo') {
-    output({ error: BYO_NETWORK }, 1);
+    output({ error: BYO_NETWORK, next: 'Run `aluvia proxy-provider aluvia`, then retry.' }, 1);
   }
   await requireHealthyDaemon();
   const before = await readControlStatus();
@@ -808,7 +973,7 @@ async function handleRotateIp(args: string[]): Promise<void> {
   }
   const rotated = await postRotate();
   const after = await readControlStatus();
-  output({
+  return outputMaybeStamp({
     sessionId: rotated.sessionId,
     connectionId: rotated.connectionId,
     targetGeo: after.targetGeo,
@@ -823,9 +988,16 @@ async function handleProxyProvider(args: string[]): Promise<void> {
   if (!raw) {
     const stored = getStoredUpstream();
     if (stored) {
-      output({ provider: 'custom', upstreamHost: parseUpstreamUrl(stored).host });
+      output({
+        provider: 'custom',
+        upstreamHost: parseUpstreamUrl(stored).host,
+        next: 'Using a pasted proxy URL. Run `aluvia proxy-provider aluvia` to use Aluvia again.',
+      });
     }
-    output({ provider: 'aluvia' });
+    output({
+      provider: 'aluvia',
+      next: 'Using the Aluvia network. Run `aluvia proxy-on` then reload.',
+    });
   }
   if (raw.toLowerCase() === 'aluvia') {
     const changed = clearUpstream();
@@ -877,5 +1049,11 @@ export async function handleProxy(args: string[]): Promise<void> {
   if (subcommand === 'proxy-provider') {
     return handleProxyProvider(args.slice(1));
   }
-  output({ error: `Unknown command: '${subcommand}'. Run "aluvia help" for usage.` }, 1);
+  output(
+    {
+      error: `Unknown command: '${subcommand}'. Run "aluvia help" for usage.`,
+      next: 'Run `aluvia help`.',
+    },
+    1,
+  );
 }

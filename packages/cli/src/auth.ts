@@ -13,7 +13,8 @@ import {
   type PendingCliAuth,
 } from './config.js';
 import { credentialNext } from './api-helpers.js';
-import { isCapturing, MCPOutputCapture } from './mcp-helpers.js';
+import { output } from './cli.js';
+import { OutputCapture } from './output-capture.js';
 
 const DEFAULT_API_URL = 'https://api.aluvia.io';
 const DEFAULT_CLAIM_URL = 'https://dashboard.aluvia.io/cli-auth';
@@ -25,17 +26,6 @@ export const PAYMENT_REQUIRED_NEXT =
 function apiBaseUrl(): string {
   const fromEnv = (process.env.ALUVIA_API_BASE_URL ?? '').trim();
   return (fromEnv || DEFAULT_API_URL).replace(/\/$/, '');
-}
-
-function authOutput(data: Record<string, unknown>, exitCode = 0): never {
-  if (isCapturing()) {
-    throw new MCPOutputCapture(data, exitCode);
-  }
-  console.log(JSON.stringify(data));
-  setTimeout(() => {
-    process.exit(exitCode);
-  }, 200);
-  return undefined as never;
 }
 
 const AUTH_USAGE = 'Usage: aluvia auth <key> | aluvia auth login | aluvia auth status';
@@ -56,33 +46,30 @@ async function finishWithKey(apiKey: string): Promise<never> {
     const api = new AluviaApi(aluviaApiOptions(apiKey));
     await api.account.get();
   } catch (err) {
-    if (err instanceof MCPOutputCapture) throw err;
+    if (err instanceof OutputCapture) throw err;
     if (err instanceof PaymentRequiredError) {
-      return authOutput(await paymentRequiredPayload(err), 1);
+      return output(await paymentRequiredPayload(err), 1);
     }
-    return authOutput(
-      { error: `Received an API key but it failed verification: ${(err as Error).message}` },
-      1,
-    );
+    return output({ error: `Received an API key but it failed verification: ${(err as Error).message}` }, 1);
   }
 
   saveApiKey(apiKey);
   clearUpstream();
   try {
     const recycled = await recycleAfterCredentialChange();
-    return authOutput({
+    return output({
       status: 'authenticated',
       recycled,
       next: credentialNext(recycled),
     });
   } catch (err) {
-    if (err instanceof MCPOutputCapture) throw err;
-    return authOutput(
+    if (err instanceof OutputCapture) throw err;
+    return output(
       {
         status: 'authenticated',
         recycled: false,
         error: `API key saved but the daemon failed to restart: ${(err as Error).message}`,
-        next: 'Key is saved. Run `aluvia start` or `aluvia setup --url <page>`.',
+        next: 'Key is saved. Run `aluvia start` or `aluvia setup`.',
       },
       1,
     );
@@ -155,7 +142,13 @@ async function runAuth(): Promise<never> {
   try {
     session = await ensureDeviceAuthSession();
   } catch (err) {
-    return authOutput({ error: `Could not start authentication: ${(err as Error).message}` }, 1);
+    return output(
+      {
+        error: `Could not start authentication: ${(err as Error).message}`,
+        next: 'Run `aluvia auth login` again.',
+      },
+      1,
+    );
   }
 
   if (!alreadyShown) {
@@ -193,59 +186,97 @@ async function runAuth(): Promise<never> {
     }
     if (status === 'approved') {
       clearPendingCliAuth();
-      return authOutput(
+      return output(
         {
           error: 'Authentication succeeded but no API key was returned. Run `aluvia auth login` again.',
+          next: 'Run `aluvia auth login` again.',
         },
         1,
       );
     }
     if (status === 'denied') {
       clearPendingCliAuth();
-      return authOutput({ error: 'Authentication was denied in the browser.' }, 1);
+      return output(
+        {
+          error: 'Authentication was denied in the browser.',
+          next: 'Ask the human to try again. Then run `aluvia auth login`.',
+        },
+        1,
+      );
     }
     if (status === 'expired' || status === 'invalid') {
       clearPendingCliAuth();
-      return authOutput({ error: 'Authentication session expired. Run `aluvia auth login` again.' }, 1);
+      return output(
+        {
+          error: 'Authentication session expired. Run `aluvia auth login` again.',
+          next: 'Run `aluvia auth login` again.',
+        },
+        1,
+      );
     }
     if (status === 'slow_down') {
       waitMs += 5000;
     }
   }
 
-  return authOutput({ error: 'Timed out waiting for approval. Run `aluvia auth login` again.' }, 1);
+  return output(
+    {
+      error: 'Timed out waiting for approval. Run `aluvia auth login` again.',
+      next: 'Run `aluvia auth login` again.',
+    },
+    1,
+  );
 }
 
 function runStatus(): never {
   if (getStoredUpstream()) {
-    return authOutput({ authenticated: false, provider: 'custom' });
+    return output({
+      authenticated: false,
+      provider: 'custom',
+      next: 'Using a pasted proxy URL. Run `aluvia proxy-provider aluvia` to use Aluvia again.',
+    });
   }
   const envKey = (process.env.ALUVIA_API_KEY ?? '').trim();
   if (envKey) {
-    return authOutput({ authenticated: true, source: 'env', provider: 'aluvia' });
+    return output({
+      authenticated: true,
+      source: 'env',
+      provider: 'aluvia',
+      next: 'Authenticated. Run `aluvia status`.',
+    });
   }
   if (getStoredApiKey()) {
-    return authOutput({
+    return output({
       authenticated: true,
       source: 'config',
       provider: 'aluvia',
       configFile: configPath(),
+      next: 'Authenticated. Run `aluvia status`.',
     });
   }
   if (getStoredInstallId()) {
-    return authOutput({ authenticated: false, provider: 'aluvia', trial: true });
+    return output({
+      authenticated: false,
+      provider: 'aluvia',
+      trial: true,
+      next: 'On a free trial. Run `aluvia setup` if Chrome is not aimed. If you see payment_required, show claim_url then `aluvia auth login`.',
+    });
   }
-  return authOutput({ authenticated: false, provider: 'none' });
+  return output({
+    authenticated: false,
+    provider: 'none',
+    next: 'No credentials yet. Run `aluvia setup` to start a trial.',
+  });
 }
 
 export async function handleAuth(args: string[]): Promise<void> {
   if (args.includes('--key')) {
-    return authOutput({ error: AUTH_USAGE }, 1);
+    return output({ error: AUTH_USAGE, next: AUTH_USAGE }, 1);
   }
 
   const subcommand = args.find((argument) => !argument.startsWith('-'));
   if (!subcommand) {
-    return authOutput({ error: AUTH_USAGE }, 1);
+    return output({ error: AUTH_USAGE, next: AUTH_USAGE }, 1);
   }
   if (subcommand === 'status') {
     return runStatus();
@@ -254,7 +285,7 @@ export async function handleAuth(args: string[]): Promise<void> {
     return runAuth();
   }
   if (subcommand === 'logout') {
-    return authOutput({ error: AUTH_USAGE }, 1);
+    return output({ error: AUTH_USAGE, next: AUTH_USAGE }, 1);
   }
 
   return finishWithKey(subcommand);
