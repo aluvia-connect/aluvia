@@ -1,14 +1,23 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
+import tls from 'node:tls';
 import { PaymentRequiredError } from './net/errors.js';
 import { isProcessAlive } from './net/process.js';
 import { credentialNext, resolveCredential } from './api-helpers.js';
-import { clearUpstream, getStoredUpstream, parseUpstreamUrl, saveUpstream } from './config.js';
+import {
+  clearUpstream,
+  configDir,
+  getStoredConnectionId,
+  getStoredUpstream,
+  parseUpstreamUrl,
+  saveConnectionId,
+  saveUpstream,
+} from './config.js';
 import { output } from './cli.js';
 import { getCliLaunch } from './cli-path.js';
-import { configDir } from './config.js';
 import { chromeRestartCommand, tryRestartChrome } from './chrome-launch.js';
 import { attachWaitMs, waitForExternalConnect, writeChromeProxyPolicy } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
@@ -112,8 +121,258 @@ function parseStartArgs(args: string[]): {
   return connectionId != null ? { dataPort, controlPort, connectionId } : { dataPort, controlPort };
 }
 
-function isLive(state: ProxyJson | null): state is ProxyJson {
+/** `--connection-id` flag, then config.json, then proxy.json. Never POST a second connection if an id is saved. */
+function resolveConnectionId(flagConnectionId?: number, existing?: ProxyJson | null): number | undefined {
+  return flagConnectionId ?? getStoredConnectionId() ?? existing?.connectionId ?? undefined;
+}
+
+/** Live pid check only. A not-live ProxyJson is still a ProxyJson. */
+function isLive(state: ProxyJson | null): boolean {
   return state != null && state.pid != null && isProcessAlive(state.pid);
+}
+
+const DATACENTER_IP = '104.30.175.37';
+const DEFAULT_PROBE_URL = 'https://api.ipify.org/';
+const UPSTREAM_UNAVAILABLE_ERROR = 'Upstream gateway returned 503 (590 UPSTREAM503).';
+const UPSTREAM_UNAVAILABLE_CODE = 'upstream_unavailable';
+const UPSTREAM_UNAVAILABLE_NEXT = 'Run `aluvia rotate-ip` then reload the tab.';
+
+export type TunnelProbe = {
+  ok: boolean;
+  status: number | null;
+  ip: string | null;
+  upstreamUnavailable: boolean;
+};
+
+function datacenterIp(): string {
+  const raw = (process.env.ALUVIA_DATACENTER_IP ?? '').trim();
+  return raw || DATACENTER_IP;
+}
+
+function probeTargetUrl(): string {
+  const raw = (process.env.ALUVIA_PROBE_URL ?? '').trim();
+  return raw || DEFAULT_PROBE_URL;
+}
+
+function extractIp(body: string): string | null {
+  const trimmed = body.trim();
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(trimmed)) return trimmed;
+  try {
+    const parsed = JSON.parse(trimmed) as { ip?: unknown };
+    if (typeof parsed.ip === 'string' && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(parsed.ip)) return parsed.ip;
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
+function requestPath(parsed: URL): string {
+  return `${parsed.pathname || '/'}${parsed.search}`;
+}
+
+const PROBE_TIMEOUT_MS = 5_000;
+const ROTATE_PROBE_ATTEMPTS = 5;
+const ROTATE_PROBE_DELAY_MS = 200;
+
+/** HTTPS CONNECT through the local proxy. ready requires CONNECT 200 and a non-datacenter egress IP. */
+export async function probeAluviaTunnel(dataPort: number): Promise<TunnelProbe> {
+  const target = probeTargetUrl();
+  let parsed: URL;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return { ok: false, status: null, ip: null, upstreamUnavailable: false };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, status: null, ip: null, upstreamUnavailable: false };
+  }
+
+  const destPort = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
+  const connectTarget = `${parsed.hostname}:${destPort}`;
+  const timedOut: TunnelProbe = { ok: false, status: null, ip: null, upstreamUnavailable: false };
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let connectSocket: net.Socket | undefined;
+    let tlsSocket: tls.TLSSocket | undefined;
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
+    let tlsTimer: ReturnType<typeof setTimeout> | undefined;
+    let getTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const req = http.request({
+      host: '127.0.0.1',
+      port: dataPort,
+      method: 'CONNECT',
+      path: connectTarget,
+    });
+
+    const finish = (result: TunnelProbe) => {
+      if (settled) return;
+      settled = true;
+      if (connectTimer) clearTimeout(connectTimer);
+      if (tlsTimer) clearTimeout(tlsTimer);
+      if (getTimer) clearTimeout(getTimer);
+      tlsSocket?.removeAllListeners();
+      connectSocket?.removeAllListeners();
+      req.removeAllListeners();
+      tlsSocket?.destroy();
+      connectSocket?.destroy();
+      req.destroy();
+      resolve(result);
+    };
+
+    connectTimer = setTimeout(() => finish(timedOut), PROBE_TIMEOUT_MS);
+    req.setTimeout(PROBE_TIMEOUT_MS, () => finish(timedOut));
+    req.on('error', () => finish(timedOut));
+    req.on('connect', (res, socket) => {
+      connectSocket = socket;
+      socket.setTimeout(PROBE_TIMEOUT_MS, () => finish(timedOut));
+      socket.on('error', () =>
+        finish({ ok: false, status: res.statusCode ?? 0, ip: null, upstreamUnavailable: false }),
+      );
+      const status = res.statusCode ?? 0;
+      if (status === 590 || status === 503) {
+        finish({ ok: false, status, ip: null, upstreamUnavailable: true });
+        return;
+      }
+      if (status !== 200) {
+        finish({ ok: false, status, ip: null, upstreamUnavailable: false });
+        return;
+      }
+
+      const request = `GET ${requestPath(parsed)} HTTP/1.1\r\nHost: ${parsed.host}\r\nConnection: close\r\n\r\n`;
+      const handleGet = (stream: net.Socket) => {
+        getTimer = setTimeout(() => finish(timedOut), PROBE_TIMEOUT_MS);
+        stream.setTimeout(PROBE_TIMEOUT_MS, () => finish(timedOut));
+        const chunks: Buffer[] = [];
+        stream.on('data', (chunk) => chunks.push(chunk));
+        stream.on('end', () => {
+          const raw = Buffer.concat(chunks).toString('utf8');
+          const sep = raw.indexOf('\r\n\r\n');
+          const header = sep === -1 ? raw : raw.slice(0, sep);
+          const body = sep === -1 ? '' : raw.slice(sep + 4);
+          const match = header.match(/^HTTP\/\d\.\d\s+(\d+)/);
+          const getStatus = match ? Number(match[1]) : 0;
+          if (getStatus === 590 || getStatus === 503) {
+            finish({ ok: false, status: getStatus, ip: null, upstreamUnavailable: true });
+            return;
+          }
+          const ip = extractIp(body);
+          const ok = getStatus === 200 && ip != null && ip !== datacenterIp();
+          finish({ ok, status, ip, upstreamUnavailable: false });
+        });
+        stream.on('error', () => {
+          finish({ ok: false, status, ip: null, upstreamUnavailable: false });
+        });
+        stream.write(request);
+      };
+
+      if (parsed.protocol !== 'https:') {
+        handleGet(socket);
+        return;
+      }
+
+      tlsTimer = setTimeout(() => finish(timedOut), PROBE_TIMEOUT_MS);
+      tlsSocket = tls.connect({
+        socket,
+        servername: net.isIP(parsed.hostname) ? undefined : parsed.hostname,
+        rejectUnauthorized: false,
+      });
+      tlsSocket.setTimeout(PROBE_TIMEOUT_MS, () => finish(timedOut));
+      tlsSocket.once('secureConnect', () => handleGet(tlsSocket!));
+      tlsSocket.once('error', () => {
+        finish({ ok: false, status, ip: null, upstreamUnavailable: false });
+      });
+    });
+    req.on('response', (res) => {
+      const status = res.statusCode ?? 0;
+      res.resume();
+      if (status === 590 || status === 503) {
+        finish({ ok: false, status, ip: null, upstreamUnavailable: true });
+        return;
+      }
+      finish({ ok: false, status, ip: null, upstreamUnavailable: false });
+    });
+    req.end();
+  });
+}
+
+function upstreamUnavailablePayload(): {
+  error: string;
+  code: string;
+  next: string;
+} {
+  return {
+    error: UPSTREAM_UNAVAILABLE_ERROR,
+    code: UPSTREAM_UNAVAILABLE_CODE,
+    next: UPSTREAM_UNAVAILABLE_NEXT,
+  };
+}
+
+async function probeUntilReady(dataPort: number): Promise<TunnelProbe> {
+  let last: TunnelProbe = { ok: false, status: null, ip: null, upstreamUnavailable: false };
+  for (let attempt = 0; attempt < ROTATE_PROBE_ATTEMPTS; attempt++) {
+    last = await probeAluviaTunnel(dataPort);
+    if (last.ok) return last;
+    if (attempt < ROTATE_PROBE_ATTEMPTS - 1) {
+      await new Promise((resolve) => setTimeout(resolve, ROTATE_PROBE_DELAY_MS));
+    }
+  }
+  return last;
+}
+
+/** Dead exit: 590/503/upstream_unavailable, or no IP. A datacenter IP is live but not ready. */
+function isDeadSessionProbe(probe: TunnelProbe): boolean {
+  if (probe.ok) return false;
+  return probe.upstreamUnavailable || probe.ip == null;
+}
+
+/**
+ * Setup session order: reuse the one connection; mint only if there is no session_id;
+ * probe a saved session and rotate only when that probe is dead.
+ */
+async function ensureSetupSession(opts: {
+  dataPort: number;
+  sessionId: string | null;
+  hadPriorSession: boolean;
+  byo: boolean;
+}): Promise<TunnelProbe> {
+  if (!opts.sessionId) {
+    if (!opts.byo) {
+      await postRotate();
+    }
+    return probeUntilReady(opts.dataPort);
+  }
+
+  const probe = opts.hadPriorSession
+    ? await probeAluviaTunnel(opts.dataPort)
+    : await probeUntilReady(opts.dataPort);
+  if (!isDeadSessionProbe(probe) || opts.byo) return probe;
+  await postRotate();
+  return probeUntilReady(opts.dataPort);
+}
+
+/** Report the raw CONNECT/GET status. Do not rewrite 502/404/590 as 503. */
+function rotateProbeFailure(probe: TunnelProbe): { error: string; code: string; next: string } {
+  if (probe.status != null) {
+    return {
+      error: `Upstream gateway returned ${probe.status}.`,
+      code: UPSTREAM_UNAVAILABLE_CODE,
+      next: UPSTREAM_UNAVAILABLE_NEXT,
+    };
+  }
+  if (probe.ip != null) {
+    return {
+      error: `Upstream gateway returned datacenter IP ${probe.ip}.`,
+      code: UPSTREAM_UNAVAILABLE_CODE,
+      next: UPSTREAM_UNAVAILABLE_NEXT,
+    };
+  }
+  return {
+    error: 'Upstream gateway did not return a non-datacenter IP.',
+    code: UPSTREAM_UNAVAILABLE_CODE,
+    next: UPSTREAM_UNAVAILABLE_NEXT,
+  };
 }
 
 function aimedFrom(state: ProxyJson | null): boolean {
@@ -134,7 +393,8 @@ const STATUS_WHAT = {
   aimed:
     'Has Chrome CONNECTed to the local proxy? Idle tabs stay aimed. After next asks you to reload, the following status/setup checks for a CONNECT since that ask.',
   egress: 'aluvia = mobile/residential IP. direct = this VM datacenter IP.',
-  ready: 'aimed and the daemon is up. Reload the tab.',
+  ready:
+    'Aluvia tunnel CONNECT returned 200 and the egress IP is not this VM datacenter IP. Distinct from aimed.',
   healthy: 'The local proxy process is accepting connections.',
   needsChromeRestart: 'true means run chromeCommand (quit then launch). Then run aluvia setup again.',
   rules: '["*"] = all hosts through Aluvia. [] = all hosts direct.',
@@ -180,10 +440,16 @@ function statusNext(opts: {
   };
 }
 
-function statusFields(state: ProxyJson, healthy: boolean, extra?: Record<string, unknown>) {
+function statusFields(
+  state: ProxyJson,
+  healthy: boolean,
+  extra?: Record<string, unknown> & { probe?: TunnelProbe },
+) {
   const egress = egressFromRules(state.rules);
   const aimed = aimedFrom(state);
   const live = isLive(state);
+  const probe = extra?.probe;
+  const probeOk = probe?.ok === true;
   const guide = statusNext({
     live,
     healthy,
@@ -191,8 +457,9 @@ function statusFields(state: ProxyJson, healthy: boolean, extra?: Record<string,
     egress,
     dataPort: state.dataPort,
   });
+  const { probe: _probe, ...rest } = extra ?? {};
   return {
-    next: guide.next,
+    next: probe?.upstreamUnavailable ? UPSTREAM_UNAVAILABLE_NEXT : guide.next,
     pid: state.pid,
     proxyUrl: state.proxyUrl,
     controlUrl: state.controlUrl,
@@ -205,11 +472,12 @@ function statusFields(state: ProxyJson, healthy: boolean, extra?: Record<string,
     attach: state.attach,
     egress,
     aimed,
-    ready: aimed && healthy && live,
+    ready: aimed && healthy && live && probeOk,
     needsChromeRestart: !aimed,
     what: STATUS_WHAT,
     ...(guide.chromeCommand ? { chromeCommand: guide.chromeCommand } : {}),
-    ...extra,
+    ...(probe?.upstreamUnavailable ? upstreamUnavailablePayload() : {}),
+    ...rest,
   };
 }
 
@@ -335,7 +603,7 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
     );
   }
 
-  const connectionId = flagConnectionId ?? existing?.connectionId ?? undefined;
+  const connectionId = resolveConnectionId(flagConnectionId, existing);
   const dir = configDir();
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const logFile = path.join(dir, 'proxy.log');
@@ -383,15 +651,19 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
       attempts++;
       void (async () => {
         try {
-          if (child.pid && !isProcessAlive(child.pid)) {
+          const spawnedPid = child.pid;
+          if (!spawnedPid || !isProcessAlive(spawnedPid)) {
             clearInterval(poll);
             await failIfDaemonDied(logFile);
           }
 
           const state = readProxyJson();
-          if (state && state.ready) {
+          const pidLive =
+            state != null && state.pid != null && state.pid === spawnedPid && isProcessAlive(spawnedPid);
+          const healthy = pidLive && state != null ? await bothPortsAccept(state) : false;
+          if (pidLive && healthy && state) {
             clearInterval(poll);
-            const healthy = await bothPortsAccept(state);
+            if (state.connectionId != null) saveConnectionId(state.connectionId);
             try {
               const { json } = await controlRequest('GET', '/status');
               resolve({ json: { ...statusFields(state, healthy), ...json, healthy }, healthy });
@@ -423,7 +695,7 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
 
 async function handleStart(args: string[]): Promise<void> {
   const existing = readProxyJson();
-  if (isLive(existing)) {
+  if (existing && isLive(existing)) {
     const keepGoing = 'Daemon is already running. Run `aluvia status` or keep going.';
     const notHealthy = 'Daemon is up but not healthy. Run `aluvia status`.';
     try {
@@ -505,7 +777,7 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
   }
 
   const state = readProxyJson();
-  if (!isLive(state)) {
+  if (!state || !isLive(state)) {
     output(
       {
         error: NOT_RUNNING,
@@ -570,7 +842,7 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
   }
 
   const seen = await waitForExternalConnect({ timeoutMs, sinceMs: expectConnectAfter });
-  const verifiedNow = seen || readProxyJson()?.attach.status === 'verified';
+  const verifiedNow = seen && readProxyJson()?.attach.status === 'verified';
 
   if (verifiedNow) {
     const attach: ProxyAttachState = {
@@ -658,9 +930,13 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
 async function handleSetup(args: string[]): Promise<void> {
   parseRestoreUrl(args);
   const skill = installProxySkill();
+  const priorSessionId = (readProxyJson()?.sessionId ?? '').trim() || null;
+  // 1. Reuse the one saved connection (never POST a second).
   const result = await runAttach(args);
+  // 2. proxy-on / rules ['*'].
   await postEgress(true);
   const state = readProxyJson();
+  if (state?.connectionId != null) saveConnectionId(state.connectionId);
   let statusJson: Record<string, unknown> = {};
   let healthy = false;
   try {
@@ -670,26 +946,61 @@ async function handleSetup(args: string[]): Promise<void> {
   } catch (err) {
     failControl(err);
   }
-  const ready = result.status === 'verified' && healthy;
+  const aimed = result.status === 'verified';
+  const sessionId =
+    typeof statusJson.sessionId === 'string' && statusJson.sessionId
+      ? statusJson.sessionId
+      : (state?.sessionId ?? null);
+  // 3. No session_id → mint once, wait for a live probe.
+  // 4. Saved session_id → probe; live keeps it; dead (590/503/no IP) rotates once, then wait.
+  // 5. Never rotate unconditionally. rotate-ip remains the explicit new-exit command.
+  const probe =
+    state && healthy
+      ? await ensureSetupSession({
+          dataPort: state.dataPort,
+          sessionId,
+          hadPriorSession: Boolean(priorSessionId),
+          byo: resolveCredential().kind === 'byo',
+        })
+      : {
+          ok: false,
+          status: null,
+          ip: null,
+          upstreamUnavailable: readProxyJson()?.code === UPSTREAM_UNAVAILABLE_CODE,
+        };
+  if (state && healthy) {
+    try {
+      const { json } = await controlRequest('GET', '/status');
+      statusJson = json;
+    } catch (err) {
+      failControl(err);
+    }
+  }
+  const ready = aimed && healthy && probe.ok;
   const skillPath = skill.skillPaths[0] ?? null;
+  const unavailable =
+    probe.upstreamUnavailable ||
+    isDeadSessionProbe(probe) ||
+    readProxyJson()?.code === UPSTREAM_UNAVAILABLE_CODE;
   return outputMaybeStamp({
-    next: setupNext(ready),
+    next: unavailable ? UPSTREAM_UNAVAILABLE_NEXT : setupNext(ready),
     skillPath,
     ...statusJson,
     healthy,
     ready,
     egress: 'aluvia',
-    aimed: ready,
-    needsChromeRestart: !ready,
+    aimed,
+    needsChromeRestart: !aimed,
     skillPaths: skill.skillPaths,
     ...(skill.error ? { skillError: skill.error } : {}),
     ...attachPublicFields(result),
+    ...(unavailable ? upstreamUnavailablePayload() : {}),
   });
 }
 
 async function stopDaemonProcess(): Promise<ProxyJson | null> {
   const existing = readProxyJson();
-  if (!isLive(existing)) {
+  if (!existing || !isLive(existing)) {
     if (existing) clearPidReady(existing);
     return null;
   }
@@ -742,13 +1053,14 @@ async function handleStop(): Promise<void> {
 /** Restart proxyd so a newly saved API key or BYO URL takes effect. Chrome stays aimed. */
 export async function recycleDaemonIfRunning(): Promise<{ recycled: boolean }> {
   const existing = readProxyJson();
-  if (!isLive(existing)) return { recycled: false };
+  if (!existing || !isLive(existing)) return { recycled: false };
+  const connectionId = resolveConnectionId(undefined, existing);
   const args = [
     '--port',
     String(existing.dataPort),
     '--control-port',
     String(existing.controlPort),
-    ...(existing.connectionId != null ? ['--connection-id', String(existing.connectionId)] : []),
+    ...(connectionId != null ? ['--connection-id', String(connectionId)] : []),
   ];
   await stopDaemonProcess();
   await startDaemon(args);
@@ -771,8 +1083,20 @@ async function handleStatus(): Promise<void> {
       await persistAttach(probe.attach);
     }
     const aimedState = base && probe ? { ...base, attach: probe.attach, lastConnect } : base;
+    const aimedNow = aimedState ? aimedFrom(aimedState) : false;
+    const tunnelProbe =
+      aimedNow &&
+      healthy &&
+      egressFromRules(aimedState?.rules ?? state?.rules ?? []) === 'aluvia' &&
+      aimedState
+        ? await probeAluviaTunnel(aimedState.dataPort)
+        : aimedState?.code === UPSTREAM_UNAVAILABLE_CODE
+          ? { ok: false, status: 590, ip: null, upstreamUnavailable: true }
+          : undefined;
     return outputMaybeStamp(
-      aimedState ? { ...statusFields(aimedState, healthy), ...json, healthy } : { ...json, healthy },
+      aimedState
+        ? { ...statusFields(aimedState, healthy, { probe: tunnelProbe }), ...json, healthy }
+        : { ...json, healthy },
     );
   } catch (err) {
     if (isControlClientError(err, 'not_running')) {
@@ -973,12 +1297,33 @@ async function handleRotateIp(args: string[]): Promise<void> {
   }
   const rotated = await postRotate();
   const after = await readControlStatus();
+  const state = readProxyJson();
+  const probe = state
+    ? await probeUntilReady(state.dataPort)
+    : {
+        ok: false,
+        status: null,
+        ip: null,
+        upstreamUnavailable: false,
+      };
+  if (!probe.ok) {
+    return outputMaybeStamp({
+      sessionId: rotated.sessionId,
+      connectionId: rotated.connectionId,
+      targetGeo: after.targetGeo,
+      egress: 'aluvia',
+      rotated: false,
+      ready: false,
+      ...rotateProbeFailure(probe),
+    });
+  }
   return outputMaybeStamp({
     sessionId: rotated.sessionId,
     connectionId: rotated.connectionId,
     targetGeo: after.targetGeo,
     egress: 'aluvia',
     rotated: true,
+    ready: true,
     next: 'Reload the tab. Do not restart Chrome.',
   });
 }

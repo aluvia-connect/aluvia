@@ -8,7 +8,7 @@ import { captureOutput } from '../src/output-capture.js';
 import { handleProxy } from '../src/proxy.js';
 import { defaultAttach, readProxyJson, writeProxyJson } from '../src/proxy-state.js';
 import { createMockAluviaApi } from './helpers/mock-aluvia-api.js';
-import { createMockGateway } from './helpers/mock-gateway.js';
+import { createMockGateway, MOCK_EGRESS_IP } from './helpers/mock-gateway.js';
 import { connectViaProxy } from './helpers/connect-via-proxy.js';
 import { findFreePort } from './helpers/ports.js';
 
@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'ALUVIA_PROXY_CONTROL_PORT',
   'ALUVIA_GATEWAY_HOST',
   'ALUVIA_GATEWAY_PORT',
+  'ALUVIA_PROBE_URL',
 ] as const;
 
 const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
@@ -61,6 +62,7 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     process.env.ALUVIA_API_BASE_URL = api.url;
     process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
     process.env.ALUVIA_GATEWAY_PORT = String(gateway.port);
+    process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
     delete process.env.ALUVIA_PROXY_PORT;
     delete process.env.ALUVIA_PROXY_CONTROL_PORT;
     const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
@@ -202,7 +204,10 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     assert.match(sessionId, /^[0-9a-f]{32}$/);
     assert.notStrictEqual(sessionId, previous);
     assert.strictEqual(rotated.data.connectionId, status.data.connectionId);
+    assert.strictEqual(rotated.data.rotated, true);
+    assert.strictEqual(rotated.data.ready, true);
     assert.strictEqual(api.state.session_id, sessionId);
+    assert.strictEqual(api.state.session_id, readProxyJson()?.sessionId);
   });
 
   test('proxy-on and rotate-ip reject --geo all / any / *', async () => {
@@ -335,5 +340,75 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
       if (state) writeProxyJson({ ...state, pid: null, ready: false });
       await new Promise<void>((resolve) => fake.close(() => resolve()));
     }
+  });
+});
+
+describe('rotate-ip waits for a successful tunnel probe', { concurrency: 1 }, () => {
+  let home: string;
+  let api: Awaited<ReturnType<typeof createMockAluviaApi>>;
+  let gateway: Awaited<ReturnType<typeof createMockGateway>>;
+  let dataPort: number;
+  let controlPort: number;
+  const originalEnv = snapshotEnv();
+
+  beforeEach(async () => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-home-'));
+    api = await createMockAluviaApi();
+    gateway = await createMockGateway({
+      failConnectHosts: [MOCK_EGRESS_IP],
+      connectFailStatus: 502,
+    });
+    dataPort = await findFreePort();
+    controlPort = await findFreePort();
+    process.env.ALUVIA_HOME = home;
+    process.env.ALUVIA_API_KEY = 'test-key';
+    process.env.ALUVIA_API_BASE_URL = api.url;
+    process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
+    process.env.ALUVIA_GATEWAY_PORT = String(gateway.port);
+    process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
+    delete process.env.ALUVIA_PROXY_PORT;
+    delete process.env.ALUVIA_PROXY_CONTROL_PORT;
+    const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(started.isError, false, String(started.data.error ?? ''));
+  });
+
+  afterEach(async () => {
+    const state = readProxyJson();
+    if (state?.pid === process.pid) {
+      writeProxyJson({ ...state, pid: null, ready: false });
+    }
+    try {
+      await captureOutput(() => handleProxy(['stop']));
+    } catch {
+      // ignore
+    }
+    await gateway.close();
+    await api.close();
+    restoreEnv(originalEnv);
+    try {
+      fs.rmSync(home, { recursive: true, force: true });
+    } catch {
+      try {
+        fs.rmSync(home, { recursive: true, force: true });
+      } catch {
+        // ignore leftover tmp files
+      }
+    }
+  });
+
+  test('rotate-ip does not return success without a successful probe', async () => {
+    const before = String(readProxyJson()?.sessionId ?? '');
+    assert.match(before, /^[0-9a-f]{32}$/);
+    const rotated = await captureOutput(() => handleProxy(['rotate-ip']));
+    assert.strictEqual(rotated.isError, false, String(rotated.data.error ?? ''));
+    assert.strictEqual(rotated.data.rotated, false);
+    assert.strictEqual(rotated.data.ready, false);
+    const sessionId = String(rotated.data.sessionId);
+    assert.match(sessionId, /^[0-9a-f]{32}$/);
+    assert.notStrictEqual(sessionId, before);
+    assert.strictEqual(api.state.session_id, sessionId);
+    assert.strictEqual(readProxyJson()?.sessionId, sessionId);
+    assert.match(String(rotated.data.error), /Upstream gateway returned \d+\./);
+    assert.ok(!String(rotated.data.error).includes('590 UPSTREAM503'));
   });
 });

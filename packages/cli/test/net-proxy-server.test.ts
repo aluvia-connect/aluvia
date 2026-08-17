@@ -27,6 +27,7 @@ describe('ProxyServer hostname extraction', () => {
 
     assert.deepStrictEqual(res, {
       upstreamProxyUrl: 'http://user:pass@gateway.aluvia.io:8080',
+      customTag: 'example.com',
     });
   });
 
@@ -54,6 +55,7 @@ describe('ProxyServer hostname extraction', () => {
 
     assert.deepStrictEqual(res, {
       upstreamProxyUrl: 'http://user:pass@gateway.aluvia.io:8080',
+      customTag: 'example.com',
     });
   });
 });

@@ -30,12 +30,20 @@ export class ProxyServer {
   private static readonly NO_CONFIG_WARN_INTERVAL_MS = 30_000;
   private lastNoConfigWarnAt = 0;
   private suppressedNoConfigWarnCount = 0;
-  private requestObserver: ((hostname: string) => void) | null = null;
+  private requestObserver: ((hostname: string, viaUpstream: boolean) => void) | null = null;
+  private connectObserver: ((info: { hostname: string; ok: boolean; statusCode?: number }) => void) | null =
+    null;
   private readonly hostConnections = new Map<string, Set<number | string>>();
   private readonly connectionHosts = new Map<string, string>();
 
-  setRequestObserver(fn: ((hostname: string) => void) | null): void {
+  setRequestObserver(fn: ((hostname: string, viaUpstream: boolean) => void) | null): void {
     this.requestObserver = fn;
+  }
+
+  setConnectObserver(
+    fn: ((info: { hostname: string; ok: boolean; statusCode?: number }) => void) | null,
+  ): void {
+    this.connectObserver = fn;
   }
 
   /**
@@ -94,6 +102,14 @@ export class ProxyServer {
       this.server.on('connectionClosed', ({ connectionId }) => {
         this.forgetConnection(connectionId);
       });
+      this.server.on('tunnelConnectResponded', (info) => {
+        const hostname = typeof info.customTag === 'string' ? info.customTag : '';
+        this.connectObserver?.({ hostname, ok: true, statusCode: info.response?.statusCode ?? 200 });
+      });
+      this.server.on('tunnelConnectFailed', (info) => {
+        const hostname = typeof info.customTag === 'string' ? info.customTag : '';
+        this.connectObserver?.({ hostname, ok: false, statusCode: info.response?.statusCode });
+      });
 
       // Get the actual port (especially important when port was 0)
       const address = this.server.server.address() as AddressInfo;
@@ -144,16 +160,17 @@ export class ProxyServer {
     port?: number;
     isHttp?: boolean;
     connectionId?: number | string;
-  }): { upstreamProxyUrl: string } | undefined {
+  }): { upstreamProxyUrl: string; customTag?: unknown } | undefined {
     // Extract hostname
     const hostname = this.extractHostname(params);
     if (hostname) {
       this.trackConnection(hostname, params.connectionId);
-      this.requestObserver?.(hostname);
     }
 
     // Get current config
     const config = this.configManager.getConfig();
+    let viaUpstream = false;
+    let result: { upstreamProxyUrl: string; customTag?: unknown } | undefined;
 
     if (!config) {
       const now = Date.now();
@@ -172,36 +189,31 @@ export class ProxyServer {
         this.suppressedNoConfigWarnCount += 1;
         this.logger.debug('No config available, bypassing proxy (direct)');
       }
-      return undefined;
-    }
-
-    if (!hostname) {
+    } else if (!hostname) {
       this.logger.debug('Could not extract hostname, going direct');
-      return undefined;
-    }
-
-    if (isLoopbackHostname(hostname)) {
+    } else if (isLoopbackHostname(hostname)) {
       this.logger.debug(`Hostname ${hostname} is loopback, going direct`);
-      return undefined;
+    } else {
+      // Check if we should proxy this hostname (use pre-normalized rules if available)
+      const useProxy = config.normalizedRules
+        ? shouldProxyNormalized(hostname, config.normalizedRules)
+        : shouldProxy(hostname, config.rules);
+
+      if (!useProxy) {
+        this.logger.debug(`Hostname ${hostname} bypassing proxy (direct)`);
+      } else {
+        const { protocol, host, port, username, password } = config.rawProxy;
+        const upstreamProxyUrl = `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
+        this.logger.debug(`Hostname ${hostname} routing through Aluvia`);
+        viaUpstream = true;
+        result = { upstreamProxyUrl, customTag: hostname };
+      }
     }
 
-    // Check if we should proxy this hostname (use pre-normalized rules if available)
-    const useProxy = config.normalizedRules
-      ? shouldProxyNormalized(hostname, config.normalizedRules)
-      : shouldProxy(hostname, config.rules);
-
-    if (!useProxy) {
-      this.logger.debug(`Hostname ${hostname} bypassing proxy (direct)`);
-      return undefined;
+    if (hostname) {
+      this.requestObserver?.(hostname, viaUpstream);
     }
-
-    // Build upstream proxy URL
-    const { protocol, host, port, username, password } = config.rawProxy;
-    const upstreamProxyUrl = `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
-
-    this.logger.debug(`Hostname ${hostname} routing through Aluvia`);
-
-    return { upstreamProxyUrl };
+    return result;
   }
 
   private trackConnection(hostname: string, connectionId: number | string | undefined): void {

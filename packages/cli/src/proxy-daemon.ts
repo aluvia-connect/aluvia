@@ -3,6 +3,7 @@ import { PaymentRequiredError } from './net/errors.js';
 import { isLoopbackHostname } from './net/loopback.js';
 import { ConfigManager } from './net/config-manager.js';
 import { ProxyServer } from './net/proxy-server.js';
+import { saveConnectionId } from './config.js';
 import { createControlServer } from './proxy-control-server.js';
 import {
   DEFAULT_CONTROL_PORT,
@@ -156,9 +157,8 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
   const proxy = new ProxyServer(config, { logLevel: 'info' });
 
   let lastConnect: LastConnectSnapshot = normalizeLastConnect(existing?.lastConnect);
-  proxy.setRequestObserver((hostname) => {
-    if (isLoopbackHostname(hostname)) return;
-    lastConnect = { hostname, at: Date.now() };
+
+  const maybeVerifyAttach = (): void => {
     const expectAfter = attach.expectConnectAfter ?? null;
     if (
       attach.status !== 'verified' &&
@@ -170,13 +170,18 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
         status: 'verified',
         method: attach.method ?? 'flags',
         expectConnectAfter: expectAfter,
+        reloadAskedAt: attach.reloadAskedAt,
       };
     }
-    persist(true);
-  });
+  };
 
-  const persist = (ready: boolean): void => {
+  const persistConnectionId = (id: number | null | undefined): void => {
+    if (id != null) saveConnectionId(id);
+  };
+
+  const persist = (ready: boolean, extra?: { error?: string | null; code?: string | null }): void => {
     const netState = networkState(config);
+    persistConnectionId(netState.connectionId ?? opts.connectionId ?? existing?.connectionId);
     const data: ProxyJson = {
       pid: process.pid,
       ready,
@@ -190,9 +195,37 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       rules: netState.rules,
       attach,
       lastConnect,
+      ...(extra?.error != null || extra?.code != null
+        ? { error: extra.error ?? null, code: extra.code ?? null }
+        : {}),
     };
     writeProxyJson(data);
   };
+
+  proxy.setRequestObserver((hostname, viaUpstream) => {
+    if (isLoopbackHostname(hostname)) return;
+    lastConnect = { hostname, at: Date.now() };
+    // Direct (no Aluvia hop) can mark aim. An upstream CONNECT is verified
+    // only after tunnelConnectResponded — a 590 must not count as verified.
+    if (!viaUpstream) maybeVerifyAttach();
+    persist(true);
+  });
+
+  proxy.setConnectObserver((outcome) => {
+    if (isLoopbackHostname(outcome.hostname)) return;
+    if (outcome.ok) {
+      maybeVerifyAttach();
+      persist(true);
+      return;
+    }
+    const status = outcome.statusCode;
+    if (status === 503 || status === 590) {
+      persist(false, {
+        error: 'Upstream gateway returned 503 (590 UPSTREAM503).',
+        code: 'upstream_unavailable',
+      });
+    }
+  });
 
   writeProxyJson({
     pid: process.pid,
@@ -229,6 +262,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
 
   try {
     await config.init();
+    persistConnectionId(config.connectionId ?? opts.connectionId);
     await proxy.start(opts.dataPort);
     if (!opts.upstream && networkState(config).sessionId == null) {
       await config.setConfig({ session_id: crypto.randomUUID().replace(/-/g, '') });
@@ -308,9 +342,10 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
       return { egress: 'direct' as const, rules: networkState(config).rules };
     },
     rotateIp: async () => {
+      // Drop local tunnels first. PATCH replaces session_id; there is no session close API.
+      proxy.closeAllConnections();
       const sessionId = crypto.randomUUID().replace(/-/g, '');
       await config.setConfig({ session_id: sessionId });
-      proxy.closeAllConnections();
       persist(true);
       const netState = networkState(config);
       return {

@@ -26,6 +26,8 @@ export type PendingCliAuth = {
 export interface AluviaConfig {
   apiKey?: string;
   installId?: string;
+  /** Persisted Aluvia account connection. Reused across stop/start; there is no DELETE API. */
+  connectionId?: number;
   upstream?: string;
   source?: string;
   cliAuth?: PendingCliAuth;
@@ -171,6 +173,35 @@ export function clearApiKey(): boolean {
     return false;
   }
   delete config.apiKey;
+  writeConfig(config);
+  return true;
+}
+
+function parseStoredConnectionId(raw: unknown): number | undefined {
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw;
+  return undefined;
+}
+
+/** Account connection id from `$ALUVIA_HOME/config.json`. Survives a wiped proxy.json. */
+export function getStoredConnectionId(): number | undefined {
+  return parseStoredConnectionId(readConfig().connectionId);
+}
+
+export function saveConnectionId(connectionId: number): void {
+  const id = parseStoredConnectionId(connectionId);
+  if (id == null) return;
+  const config = readConfig();
+  if (config.connectionId === id) return;
+  config.connectionId = id;
+  writeConfig(config);
+}
+
+export function clearConnectionId(): boolean {
+  const config = readConfig();
+  if (config.connectionId == null) {
+    return false;
+  }
+  delete config.connectionId;
   writeConfig(config);
   return true;
 }

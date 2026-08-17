@@ -116,4 +116,26 @@ describe('configDir ALUVIA_HOME', () => {
     delete process.env.ALUVIA_UPSTREAM;
     fs.rmSync(home, { recursive: true, force: true });
   });
+
+  test('connectionId persist helpers write config.json', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-home-'));
+    process.env.ALUVIA_HOME = home;
+    const { getStoredConnectionId, saveConnectionId, clearConnectionId, saveApiKey, getStoredApiKey } =
+      await import('../src/config.js');
+    assert.strictEqual(getStoredConnectionId(), undefined);
+    saveApiKey('test-key');
+    saveConnectionId(3449);
+    assert.strictEqual(getStoredConnectionId(), 3449);
+    assert.strictEqual(getStoredApiKey(), 'test-key');
+    const parsed = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')) as {
+      connectionId?: number;
+    };
+    assert.strictEqual(parsed.connectionId, 3449);
+    assert.strictEqual(clearConnectionId(), true);
+    assert.strictEqual(getStoredConnectionId(), undefined);
+    assert.strictEqual(getStoredApiKey(), 'test-key');
+    fs.rmSync(home, { recursive: true, force: true });
+  });
 });

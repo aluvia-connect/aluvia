@@ -10,7 +10,9 @@ declare module 'proxy-chain' {
     connectionId?: number | string;
   };
 
-  export type PrepareRequestFunctionResult = { upstreamProxyUrl: string } | undefined;
+  export type PrepareRequestFunctionResult =
+    | { upstreamProxyUrl: string; customTag?: unknown }
+    | undefined;
 
   export type PrepareRequestFunction =
     | ((params: PrepareRequestFunctionParams) => PrepareRequestFunctionResult)
@@ -30,6 +32,10 @@ declare module 'proxy-chain' {
     closeConnection(connectionId: number | string): void;
     closeConnections(): void;
     on(event: 'connectionClosed', listener: (info: { connectionId: number | string }) => void): this;
+    on(
+      event: 'tunnelConnectResponded' | 'tunnelConnectFailed',
+      listener: (info: { customTag?: unknown; response?: { statusCode?: number } }) => void,
+    ): this;
     server: {
       address(): import('net').AddressInfo | string | null;
     };

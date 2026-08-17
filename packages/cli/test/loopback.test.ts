@@ -60,6 +60,7 @@ describe('ProxyServer loopback bypass', () => {
   test('still proxies a matching public host when rules include *', () => {
     assert.deepStrictEqual(decide('example.com'), {
       upstreamProxyUrl: 'http://user:pass@gateway.aluvia.io:8080',
+      customTag: 'example.com',
     });
   });
 });

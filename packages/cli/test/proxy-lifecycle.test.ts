@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
+import { getStoredConnectionId } from '../src/config.js';
 import { captureOutput } from '../src/output-capture.js';
 import { handleProxy } from '../src/proxy.js';
 import { defaultAttach, readProxyJson, writeProxyJson, type ProxyJson } from '../src/proxy-state.js';
@@ -164,9 +165,37 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(state.ready, true);
     assert.match(state.sessionId ?? '', /^[0-9a-f]{32}$/);
     assert.strictEqual(state.connectionId, 3449);
+    assert.strictEqual(getStoredConnectionId(), 3449);
     assert.deepStrictEqual(state.rules, []);
     assert.match(api.state.session_id ?? '', /^[0-9a-f]{32}$/);
     assert.strictEqual(api.state.session_id, state.sessionId);
+  });
+
+  test('wiping proxy.json but keeping config.json reuses connectionId', async () => {
+    const first = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
+    assert.strictEqual(getStoredConnectionId(), 3449);
+    const postsAfterFirst = api.requests.filter(
+      (req) => req.method === 'POST' && req.url === '/account/connections',
+    ).length;
+    assert.strictEqual(postsAfterFirst, 1);
+
+    const stopped = await captureOutput(() => handleProxy(['stop']));
+    assert.strictEqual(stopped.isError, false, String(stopped.data.error ?? ''));
+    fs.rmSync(path.join(home, 'proxy.json'), { force: true });
+    assert.strictEqual(getStoredConnectionId(), 3449);
+
+    const second = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(second.isError, false, String(second.data.error ?? ''));
+    assert.strictEqual(second.data.connectionId, 3449);
+    assert.strictEqual(readProxyJson()?.connectionId, 3449);
+    const postsAfterSecond = api.requests.filter(
+      (req) => req.method === 'POST' && req.url === '/account/connections',
+    ).length;
+    assert.strictEqual(postsAfterSecond, 1);
+    assert.ok(
+      api.requests.some((req) => req.method === 'GET' && req.url.startsWith('/account/connections/3449')),
+    );
   });
 
   test('stale --connection-id creates a new connection after GET 404', async () => {
@@ -221,6 +250,31 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(second.data.error, undefined);
     assert.ok(typeof second.data.proxyUrl === 'string');
     assert.match(String(second.data.next), /already running/);
+  });
+
+  test('stale ready:true is not treated as a live daemon', async () => {
+    const stale: ProxyJson = {
+      pid: 999999994,
+      ready: true,
+      dataPort,
+      controlPort,
+      proxyUrl: `http://127.0.0.1:${dataPort}`,
+      controlUrl: `http://127.0.0.1:${controlPort}`,
+      connectionId: 3449,
+      sessionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      targetGeo: null,
+      rules: [],
+      attach: defaultAttach(),
+    };
+    writeProxyJson(stale);
+    const result = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    const after = readProxyJson();
+    assert.ok(after);
+    assert.notStrictEqual(after.pid, 999999994);
+    assert.ok(after.pid != null && after.pid > 0);
+    assert.strictEqual(after.ready, true);
+    assert.strictEqual(result.data.healthy, true);
   });
 
   test('stale pid', async () => {
@@ -302,6 +356,8 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(after.pid, null);
     assert.strictEqual(after.ready, false);
     assert.strictEqual(after.sessionId, sessionId);
+    assert.strictEqual(after.connectionId, before.connectionId);
+    assert.strictEqual(getStoredConnectionId(), before.connectionId ?? undefined);
     assert.deepStrictEqual(after.rules, rules);
 
     const status = await captureOutput(() => handleProxy(['status']));

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isLoopbackHostname } from './net/loopback.js';
 import { controlRequest } from './proxy-control-client.js';
+import { readProxyJson } from './proxy-state.js';
 
 export type PolicyWriteResult = {
   wrote: boolean;
@@ -112,6 +113,7 @@ export function attachWaitMs(): number {
 /**
  * Wait for a GUI CONNECT that happens at or after `sinceMs`.
  * Pre-existing CONNECTs (including `curl -x` before attach started) do not count.
+ * A 590/503 CONNECT is not verified aim — returns false once the daemon records it.
  */
 export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs: number }): Promise<boolean> {
   const deadline = Date.now() + opts.timeoutMs;
@@ -120,8 +122,16 @@ export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs:
       const res = await controlRequest('GET', '/last-connect');
       const hostname = res.json.hostname;
       const at = typeof res.json.at === 'number' ? res.json.at : null;
-      if (typeof hostname === 'string' && hostname.length > 0 && !isLoopbackHostname(hostname)) {
-        if (at != null && at >= opts.sinceMs) return true;
+      const recent =
+        typeof hostname === 'string' &&
+        hostname.length > 0 &&
+        !isLoopbackHostname(hostname) &&
+        at != null &&
+        at >= opts.sinceMs;
+      if (recent) {
+        const state = readProxyJson();
+        if (state?.code === 'upstream_unavailable') return false;
+        if (state?.attach.status === 'verified') return true;
       }
     } catch {
       // keep polling until timeout
