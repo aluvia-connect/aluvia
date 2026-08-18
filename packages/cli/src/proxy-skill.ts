@@ -39,6 +39,10 @@ export function skillInstallDirs(): string[] {
     path.join(home, '.grok', 'skills'),
     path.join(home, '.claude', 'skills'),
     path.join(home, '.cursor', 'skills'),
+    path.join(home, '.codex', 'skills'),
+    path.join(home, '.hermes', 'skills'),
+    path.join(home, '.openclaw', 'skills'),
+    path.join(home, '.openclaw', 'workspace', 'skills'),
   ]) {
     if (fs.existsSync(path.dirname(extra))) dirs.push(extra);
   }

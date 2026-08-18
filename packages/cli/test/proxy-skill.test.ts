@@ -10,12 +10,15 @@ describe('proxy skill install', () => {
   const prevHome = process.env.HOME;
   const prevAluviaHome = process.env.ALUVIA_HOME;
   const prevSkillDirs = process.env.ALUVIA_SKILL_DIRS;
+  const workspaceSkillDir = '/workspace/.agents/skills/aluvia';
+  let workspaceSkillExisted: boolean;
 
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-skill-'));
     process.env.HOME = home;
     process.env.ALUVIA_HOME = path.join(home, '.aluvia');
     delete process.env.ALUVIA_SKILL_DIRS;
+    workspaceSkillExisted = fs.existsSync(workspaceSkillDir);
   });
 
   afterEach(() => {
@@ -26,6 +29,9 @@ describe('proxy skill install', () => {
     if (prevSkillDirs === undefined) delete process.env.ALUVIA_SKILL_DIRS;
     else process.env.ALUVIA_SKILL_DIRS = prevSkillDirs;
     fs.rmSync(home, { recursive: true, force: true });
+    if (!workspaceSkillExisted && fs.existsSync(workspaceSkillDir)) {
+      fs.rmSync(workspaceSkillDir, { recursive: true, force: true });
+    }
   });
 
   test('bundled skill exists and is the aluvia skill', () => {
@@ -88,9 +94,49 @@ describe('proxy skill install', () => {
     assert.ok(!('skill' in result));
   });
 
-  test('default dirs include ALUVIA_HOME/skills and ~/.agents/skills', () => {
+  test('default dirs always include ALUVIA_HOME/skills and ~/.agents/skills', () => {
     const dirs = skillInstallDirs();
     assert.ok(dirs.includes(path.join(home, '.aluvia', 'skills')));
     assert.ok(dirs.includes(path.join(home, '.agents', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.hermes', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.grok', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.claude', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.cursor', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.codex', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.openclaw', 'skills')));
+    assert.ok(!dirs.includes(path.join(process.cwd(), '.grok', 'skills')));
+    assert.ok(!dirs.includes(path.join(process.cwd(), '.claude', 'skills')));
+    assert.ok(!dirs.includes(path.join(process.cwd(), '.agents', 'skills')));
+  });
+
+  test('default dirs include a host extra only when that agent home exists', () => {
+    fs.mkdirSync(path.join(home, '.hermes'));
+    fs.mkdirSync(path.join(home, '.openclaw'));
+    const dirs = skillInstallDirs();
+    assert.ok(dirs.includes(path.join(home, '.hermes', 'skills')));
+    assert.ok(dirs.includes(path.join(home, '.openclaw', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.openclaw', 'workspace', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, '.claude', 'skills')));
+  });
+
+  test('missing ~/.hermes is not created and is not in skillPaths', () => {
+    const hermesHome = path.join(home, '.hermes');
+    const hermesSkill = path.join(hermesHome, 'skills', 'aluvia', 'SKILL.md');
+    assert.ok(!fs.existsSync(hermesHome));
+    const result = installProxySkill();
+    assert.strictEqual(result.error, undefined);
+    assert.ok(!result.skillPaths.includes(hermesSkill));
+    assert.ok(!fs.existsSync(hermesHome));
+  });
+
+  test('existing ~/.hermes gets the skill', () => {
+    const hermesHome = path.join(home, '.hermes');
+    fs.mkdirSync(hermesHome);
+    const hermesSkill = path.join(hermesHome, 'skills', 'aluvia', 'SKILL.md');
+    const result = installProxySkill();
+    assert.strictEqual(result.error, undefined);
+    assert.ok(result.skillPaths.includes(hermesSkill));
+    assert.ok(fs.existsSync(hermesSkill));
+    assert.strictEqual(fs.readFileSync(hermesSkill, 'utf8'), fs.readFileSync(bundledSkillPath()!, 'utf8'));
   });
 });
