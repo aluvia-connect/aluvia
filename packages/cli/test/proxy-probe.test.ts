@@ -2,10 +2,15 @@ import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
 import tls from 'node:tls';
-import { probeAluviaTunnel } from '../src/proxy.js';
+import { DEFAULT_PROBE_URLS, probeAluviaTunnel, probeUntilReady } from '../src/proxy.js';
 import { MOCK_EGRESS_IP, MOCK_TLS } from './helpers/mock-gateway.js';
 
-const ENV_KEYS = ['ALUVIA_PROBE_URL', 'ALUVIA_DATACENTER_IP'] as const;
+const ENV_KEYS = [
+  'ALUVIA_PROBE_URL',
+  'ALUVIA_DATACENTER_IP',
+  'ALUVIA_PROBE_RETRY_DELAY_MS',
+  'ALUVIA_PROBE_RETRY_ATTEMPTS',
+] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {};
@@ -36,8 +41,11 @@ async function listenProxy(opts: {
   connectStatus?: number;
   ip?: string;
   tunnelStatus?: number;
+  connectStatuses?: number[];
+  connectStatusForHost?: Record<string, number>;
 }): Promise<{ port: number; methods: string[]; close: () => Promise<void> }> {
   const methods: string[] = [];
+  const queued = opts.connectStatuses ? [...opts.connectStatuses] : [];
   const connectStatus = opts.connectStatus ?? 200;
   const ip = opts.ip ?? MOCK_EGRESS_IP;
   const tunnelStatus = opts.tunnelStatus ?? 200;
@@ -48,8 +56,10 @@ async function listenProxy(opts: {
   });
   server.on('connect', (req, socket, head) => {
     methods.push(`CONNECT ${req.url ?? ''}`);
-    if (connectStatus !== 200) {
-      socket.write(`HTTP/1.1 ${connectStatus} Fail\r\nConnection: close\r\n\r\n`);
+    const host = (req.url ?? '').split(':')[0] ?? '';
+    const status = queued.length > 0 ? queued.shift()! : (opts.connectStatusForHost?.[host] ?? connectStatus);
+    if (status !== 200) {
+      socket.write(`HTTP/1.1 ${status} Fail\r\nConnection: close\r\n\r\n`);
       socket.end();
       return;
     }
@@ -157,6 +167,48 @@ describe('probeAluviaTunnel', { concurrency: 1 }, () => {
       assert.strictEqual(result.upstreamUnavailable, true);
       assert.ok(!proxy.methods.some((method) => method.startsWith('GET')));
       assert.deepStrictEqual(proxy.methods, ['CONNECT api.ipify.org:443']);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test('default health check is not only api.ipify.org', () => {
+    assert.ok(DEFAULT_PROBE_URLS.includes('https://api.ipify.org/'));
+    assert.ok(DEFAULT_PROBE_URLS.includes('https://ifconfig.me/ip'));
+    assert.ok(DEFAULT_PROBE_URLS.includes('https://icanhazip.com/'));
+    assert.ok(DEFAULT_PROBE_URLS.length >= 3);
+  });
+
+  test('590 on api.ipify.org then success on ifconfig.me is a live tunnel', async () => {
+    delete process.env.ALUVIA_PROBE_URL;
+    process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '1';
+    const proxy = await listenProxy({
+      ip: '107.77.213.210',
+      connectStatusForHost: { 'api.ipify.org': 590 },
+    });
+    try {
+      const result = await probeUntilReady(proxy.port);
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.ip, '107.77.213.210');
+      assert.ok(proxy.methods.includes('CONNECT api.ipify.org:443'));
+      assert.ok(proxy.methods.includes('CONNECT ifconfig.me:443'));
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test('590 then success on the next attempt of the same host is ok', async () => {
+    process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '10';
+    process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
+    const proxy = await listenProxy({
+      ip: '107.77.213.210',
+      connectStatuses: [590, 200],
+    });
+    try {
+      const result = await probeUntilReady(proxy.port);
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.ip, '107.77.213.210');
+      assert.deepStrictEqual(proxy.methods, ['CONNECT api.ipify.org:443', 'CONNECT api.ipify.org:443']);
     } finally {
       await proxy.close();
     }

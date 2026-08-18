@@ -21,6 +21,8 @@ const ENV_KEYS = [
   'ALUVIA_GATEWAY_HOST',
   'ALUVIA_GATEWAY_PORT',
   'ALUVIA_PROBE_URL',
+  'ALUVIA_PROBE_RETRY_DELAY_MS',
+  'ALUVIA_PROBE_RETRY_ATTEMPTS',
 ] as const;
 
 const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
@@ -63,6 +65,8 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
     process.env.ALUVIA_GATEWAY_PORT = String(gateway.port);
     process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
+    process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
+    process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
     delete process.env.ALUVIA_PROXY_PORT;
     delete process.env.ALUVIA_PROXY_CONTROL_PORT;
     const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
@@ -366,6 +370,8 @@ describe('rotate-ip waits for a successful tunnel probe', { concurrency: 1 }, ()
     process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
     process.env.ALUVIA_GATEWAY_PORT = String(gateway.port);
     process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
+    process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
+    process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
     delete process.env.ALUVIA_PROXY_PORT;
     delete process.env.ALUVIA_PROXY_CONTROL_PORT;
     const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));

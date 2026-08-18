@@ -211,20 +211,13 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     persist(true);
   });
 
+  // Success verifies aim. A 503/590 is a flake — do not flip ready=false or
+  // stamp upstream_unavailable. Last-CONNECT-wins used to poison status after
+  // a good page load (Chrome background CONNECTs also 590).
   proxy.setConnectObserver((outcome) => {
-    if (isLoopbackHostname(outcome.hostname)) return;
-    if (outcome.ok) {
-      maybeVerifyAttach();
-      persist(true);
-      return;
-    }
-    const status = outcome.statusCode;
-    if (status === 503 || status === 590) {
-      persist(false, {
-        error: 'Upstream gateway returned 503 (590 UPSTREAM503).',
-        code: 'upstream_unavailable',
-      });
-    }
+    if (isLoopbackHostname(outcome.hostname) || !outcome.ok) return;
+    maybeVerifyAttach();
+    persist(true);
   });
 
   writeProxyJson({

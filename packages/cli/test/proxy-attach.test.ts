@@ -25,6 +25,8 @@ const ENV_KEYS = [
   'ALUVIA_CHROME_POLICY_DIR',
   'ALUVIA_DATACENTER_IP',
   'ALUVIA_PROBE_URL',
+  'ALUVIA_PROBE_RETRY_DELAY_MS',
+  'ALUVIA_PROBE_RETRY_ATTEMPTS',
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -616,6 +618,8 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       process.env.ALUVIA_SKIP_CHROME_RESTART = '1';
       process.env.ALUVIA_CHROME_POLICY_DIR = path.join(home, 'chrome-policy');
       process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
+      process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
+      process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
       delete process.env.ALUVIA_PROXY_PORT;
       delete process.env.ALUVIA_PROXY_CONTROL_PORT;
       delete process.env.ALUVIA_ATTACH_WAIT_MS;
@@ -641,7 +645,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       }
     });
 
-    test('setup with a dead session (590) rotates once and reports upstream_unavailable if the new exit also fails', async () => {
+    test('setup with a dead session (590) rotates once after retries keep failing', async () => {
       const started = await captureOutput(() =>
         handleProxy(['start', '--port', String(dataPort), '--control-port', String(controlPort)]),
       );
@@ -678,7 +682,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       const patchesAfter = api.requests.filter(
         (req) => req.method === 'PATCH' && req.url.startsWith('/account/connections/'),
       ).length;
-      // proxy-on PATCHes rules; dead probe PATCHes one new session_id. No second rotate.
+      // proxy-on PATCHes rules; exhausted same-session retries PATCH one new session_id.
       assert.strictEqual(patchesAfter, patchesBefore + 2);
       assert.strictEqual(result.data.ready, false);
       assert.strictEqual(result.data.aimed, true);
@@ -689,7 +693,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
     });
   });
 
-  describe('setup rotates a dead session then waits for the new exit', { concurrency: 1 }, () => {
+  describe('setup retries 590 on the same session before rotating', { concurrency: 1 }, () => {
     let home: string;
     let api: Awaited<ReturnType<typeof createMockAluviaApi>>;
     let gateway: Awaited<ReturnType<typeof createMockGateway>>;
@@ -715,6 +719,8 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       process.env.ALUVIA_SKIP_CHROME_RESTART = '1';
       process.env.ALUVIA_CHROME_POLICY_DIR = path.join(home, 'chrome-policy');
       process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
+      process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
+      process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
       delete process.env.ALUVIA_PROXY_PORT;
       delete process.env.ALUVIA_PROXY_CONTROL_PORT;
       delete process.env.ALUVIA_ATTACH_WAIT_MS;
@@ -740,7 +746,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       }
     });
 
-    test('setup with a dead session (590) rotates once then waits for probe success', async () => {
+    test('590 then success on retry keeps the same sessionId and does not rotate', async () => {
       const started = await captureOutput(() =>
         handleProxy(['start', '--port', String(dataPort), '--control-port', String(controlPort)]),
       );
@@ -758,7 +764,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       const result = await pending;
       const after = readProxyJson()?.sessionId;
       assert.match(after ?? '', /^[0-9a-f]{32}$/);
-      assert.notStrictEqual(after, before);
+      assert.strictEqual(after, before);
       assert.strictEqual(result.data.sessionId, after);
       assert.strictEqual(result.data.connectionId, connectionId);
       assert.strictEqual(result.data.ready, true);
@@ -769,7 +775,90 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       const patchesAfter = api.requests.filter(
         (req) => req.method === 'PATCH' && req.url.startsWith('/account/connections/'),
       ).length;
-      assert.strictEqual(patchesAfter, patchesBefore + 2);
+      // proxy-on PATCHes rules. Retry success must not PATCH a new session_id.
+      assert.strictEqual(patchesAfter, patchesBefore + 1);
+    });
+  });
+
+  describe('status is not poisoned by one background 590', { concurrency: 1 }, () => {
+    let home: string;
+    let api: Awaited<ReturnType<typeof createMockAluviaApi>>;
+    let gateway: Awaited<ReturnType<typeof createMockGateway>>;
+    let dataPort: number;
+    let controlPort: number;
+    const originalEnv = snapshotEnv();
+
+    beforeEach(async () => {
+      home = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-home-'));
+      api = await createMockAluviaApi();
+      gateway = await createMockGateway({
+        failConnectHosts: ['mtalk.google.com'],
+        connectFailStatus: 590,
+      });
+      dataPort = await findFreePort();
+      controlPort = await findFreePort();
+      process.env.ALUVIA_HOME = home;
+      process.env.ALUVIA_API_KEY = 'test-key';
+      process.env.ALUVIA_API_BASE_URL = api.url;
+      process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
+      process.env.ALUVIA_GATEWAY_PORT = String(gateway.port);
+      process.env.ALUVIA_SKIP_CHROME_RESTART = '1';
+      process.env.ALUVIA_CHROME_POLICY_DIR = path.join(home, 'chrome-policy');
+      process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
+      process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
+      process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
+      delete process.env.ALUVIA_PROXY_PORT;
+      delete process.env.ALUVIA_PROXY_CONTROL_PORT;
+      delete process.env.ALUVIA_ATTACH_WAIT_MS;
+    });
+
+    afterEach(async () => {
+      const state = readProxyJson();
+      if (state?.pid === process.pid) {
+        writeProxyJson({ ...state, pid: null, ready: false });
+      }
+      try {
+        await captureOutput(() => handleProxy(['stop']));
+      } catch {
+        // ignore
+      }
+      await gateway.close();
+      await api.close();
+      restoreEnv(originalEnv);
+      try {
+        fs.rmSync(home, { recursive: true, force: true });
+      } catch {
+        // ignore leftover tmp files
+      }
+    });
+
+    test('a background CONNECT 590 after a good page load does not mark the tunnel dead', async () => {
+      const started = await captureOutput(() =>
+        handleProxy(['start', '--port', String(dataPort), '--control-port', String(controlPort)]),
+      );
+      assert.strictEqual(started.isError, false, String(started.data.error ?? ''));
+      process.env.ALUVIA_ATTACH_WAIT_MS = '2000';
+      const pending = captureOutput(() => handleProxy(setupArgs(dataPort, controlPort)));
+      await delay(50);
+      await connectViaProxy(dataPort, 'verify.example').catch(() => undefined);
+      const first = await pending;
+      assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
+      assert.strictEqual(first.data.ready, true);
+      const sessionId = readProxyJson()?.sessionId;
+      assert.match(sessionId ?? '', /^[0-9a-f]{32}$/);
+
+      await connectViaProxy(dataPort, 'mtalk.google.com').catch(() => undefined);
+      const state = readProxyJson();
+      assert.strictEqual(state?.ready, true);
+      assert.notStrictEqual(state?.code, 'upstream_unavailable');
+      assert.strictEqual(state?.sessionId, sessionId);
+
+      const status = await captureOutput(() => handleProxy(['status']));
+      assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
+      assert.strictEqual(status.data.ready, true);
+      assert.strictEqual(status.data.aimed, true);
+      assert.strictEqual(status.data.code, undefined);
+      assert.strictEqual(status.data.sessionId, sessionId);
     });
   });
 });

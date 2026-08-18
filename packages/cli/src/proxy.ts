@@ -132,7 +132,12 @@ function isLive(state: ProxyJson | null): boolean {
 }
 
 const DATACENTER_IP = '104.30.175.37';
-const DEFAULT_PROBE_URL = 'https://api.ipify.org/';
+/** ipify alone flakes 503 while other echo hosts already succeed on the same session. */
+export const DEFAULT_PROBE_URLS = [
+  'https://api.ipify.org/',
+  'https://ifconfig.me/ip',
+  'https://icanhazip.com/',
+];
 const UPSTREAM_UNAVAILABLE_ERROR = 'Upstream gateway returned 503 (590 UPSTREAM503).';
 const UPSTREAM_UNAVAILABLE_CODE = 'upstream_unavailable';
 const UPSTREAM_UNAVAILABLE_NEXT = 'Run `aluvia rotate-ip` then reload the tab.';
@@ -149,9 +154,22 @@ function datacenterIp(): string {
   return raw || DATACENTER_IP;
 }
 
-function probeTargetUrl(): string {
+function probeTargetUrls(): string[] {
   const raw = (process.env.ALUVIA_PROBE_URL ?? '').trim();
-  return raw || DEFAULT_PROBE_URL;
+  if (raw) return [raw];
+  return DEFAULT_PROBE_URLS;
+}
+
+function probeTargetUrl(): string {
+  return probeTargetUrls()[0] ?? DEFAULT_PROBE_URLS[0];
+}
+
+function probeRetryDelayMs(): number {
+  return parsePositiveInt(process.env.ALUVIA_PROBE_RETRY_DELAY_MS) ?? 2_000;
+}
+
+function probeRetryAttempts(): number {
+  return parsePositiveInt(process.env.ALUVIA_PROBE_RETRY_ATTEMPTS) ?? 3;
 }
 
 function extractIp(body: string): string | null {
@@ -171,12 +189,10 @@ function requestPath(parsed: URL): string {
 }
 
 const PROBE_TIMEOUT_MS = 5_000;
-const ROTATE_PROBE_ATTEMPTS = 5;
-const ROTATE_PROBE_DELAY_MS = 200;
 
 /** HTTPS CONNECT through the local proxy. ready requires CONNECT 200 and a non-datacenter egress IP. */
-export async function probeAluviaTunnel(dataPort: number): Promise<TunnelProbe> {
-  const target = probeTargetUrl();
+export async function probeAluviaTunnel(dataPort: number, targetUrl?: string): Promise<TunnelProbe> {
+  const target = (targetUrl ?? probeTargetUrl()).trim();
   let parsed: URL;
   try {
     parsed = new URL(target);
@@ -309,13 +325,29 @@ function upstreamUnavailablePayload(): {
   };
 }
 
-async function probeUntilReady(dataPort: number): Promise<TunnelProbe> {
+/** One pass across probe hosts. A 590 on ipify is not dead if another echo host is live. */
+export async function probeSessionOnce(dataPort: number): Promise<TunnelProbe> {
   let last: TunnelProbe = { ok: false, status: null, ip: null, upstreamUnavailable: false };
-  for (let attempt = 0; attempt < ROTATE_PROBE_ATTEMPTS; attempt++) {
-    last = await probeAluviaTunnel(dataPort);
-    if (last.ok) return last;
-    if (attempt < ROTATE_PROBE_ATTEMPTS - 1) {
-      await new Promise((resolve) => setTimeout(resolve, ROTATE_PROBE_DELAY_MS));
+  for (const url of probeTargetUrls()) {
+    last = await probeAluviaTunnel(dataPort, url);
+    if (last.ok || last.ip != null) return last;
+  }
+  return last;
+}
+
+/**
+ * Retry the same session on 503/590 (1–3s gaps). Do not rotate here.
+ * A datacenter IP is a live session, not a flake — stop retrying.
+ */
+export async function probeUntilReady(dataPort: number): Promise<TunnelProbe> {
+  const attempts = probeRetryAttempts();
+  const delayMs = probeRetryDelayMs();
+  let last: TunnelProbe = { ok: false, status: null, ip: null, upstreamUnavailable: false };
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    last = await probeSessionOnce(dataPort);
+    if (last.ok || last.ip != null) return last;
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
   return last;
@@ -329,7 +361,7 @@ function isDeadSessionProbe(probe: TunnelProbe): boolean {
 
 /**
  * Setup session order: reuse the one connection; mint only if there is no session_id;
- * probe a saved session and rotate only when that probe is dead.
+ * retry a saved session on 503/590; rotate only after those retries stay dead.
  */
 async function ensureSetupSession(opts: {
   dataPort: number;
@@ -344,10 +376,8 @@ async function ensureSetupSession(opts: {
     return probeUntilReady(opts.dataPort);
   }
 
-  const probe = opts.hadPriorSession
-    ? await probeAluviaTunnel(opts.dataPort)
-    : await probeUntilReady(opts.dataPort);
-  if (!isDeadSessionProbe(probe) || opts.byo) return probe;
+  const probe = await probeUntilReady(opts.dataPort);
+  if (!isDeadSessionProbe(probe) || opts.byo || !opts.hadPriorSession) return probe;
   await postRotate();
   return probeUntilReady(opts.dataPort);
 }
@@ -952,8 +982,8 @@ async function handleSetup(args: string[]): Promise<void> {
       ? statusJson.sessionId
       : (state?.sessionId ?? null);
   // 3. No session_id → mint once, wait for a live probe.
-  // 4. Saved session_id → probe; live keeps it; dead (590/503/no IP) rotates once, then wait.
-  // 5. Never rotate unconditionally. rotate-ip remains the explicit new-exit command.
+  // 4. Saved session_id → retry the same session on 503/590; rotate only if retries stay dead.
+  // 5. rotate-ip remains the explicit new-exit command. Do not rotate to heal first setup.
   const probe =
     state && healthy
       ? await ensureSetupSession({
@@ -978,10 +1008,7 @@ async function handleSetup(args: string[]): Promise<void> {
   }
   const ready = aimed && healthy && probe.ok;
   const skillPath = skill.skillPaths[0] ?? null;
-  const unavailable =
-    probe.upstreamUnavailable ||
-    isDeadSessionProbe(probe) ||
-    readProxyJson()?.code === UPSTREAM_UNAVAILABLE_CODE;
+  const unavailable = isDeadSessionProbe(probe);
   return outputMaybeStamp({
     next: unavailable ? UPSTREAM_UNAVAILABLE_NEXT : setupNext(ready),
     skillPath,
@@ -1089,10 +1116,8 @@ async function handleStatus(): Promise<void> {
       healthy &&
       egressFromRules(aimedState?.rules ?? state?.rules ?? []) === 'aluvia' &&
       aimedState
-        ? await probeAluviaTunnel(aimedState.dataPort)
-        : aimedState?.code === UPSTREAM_UNAVAILABLE_CODE
-          ? { ok: false, status: 590, ip: null, upstreamUnavailable: true }
-          : undefined;
+        ? await probeUntilReady(aimedState.dataPort)
+        : undefined;
     return outputMaybeStamp(
       aimedState
         ? { ...statusFields(aimedState, healthy, { probe: tunnelProbe }), ...json, healthy }

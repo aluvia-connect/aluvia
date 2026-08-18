@@ -113,7 +113,8 @@ export function attachWaitMs(): number {
 /**
  * Wait for a GUI CONNECT that happens at or after `sinceMs`.
  * Pre-existing CONNECTs (including `curl -x` before attach started) do not count.
- * A 590/503 CONNECT is not verified aim — returns false once the daemon records it.
+ * A 590/503 CONNECT is not verified aim — only tunnelConnectResponded verifies.
+ * One 590 does not abort the wait; keep looking for a 200.
  */
 export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs: number }): Promise<boolean> {
   const deadline = Date.now() + opts.timeoutMs;
@@ -130,7 +131,6 @@ export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs:
         at >= opts.sinceMs;
       if (recent) {
         const state = readProxyJson();
-        if (state?.code === 'upstream_unavailable') return false;
         if (state?.attach.status === 'verified') return true;
       }
     } catch {
