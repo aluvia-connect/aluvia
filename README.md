@@ -29,7 +29,7 @@ npx aluvia-cli setup
 
 `--url <page>` is optional. If you have the blocked page, pass it so Chrome opens that tab after the restart.
 
-That starts the daemon, aims Chrome at `127.0.0.1:18787`, and installs the [agent skill](./skills/aluvia/SKILL.md) into `~/.agents/skills` (and other agent skill dirs if they exist).
+That starts the daemon, aims Chrome at `127.0.0.1:18787`, and copies the [agent skill](./skills/aluvia/SKILL.md) into the skill dirs on this machine.
 
 A first setup starts a free trial. No API key.
 
@@ -47,13 +47,16 @@ Read the JSON. **`next` is the next action.**
 
 | Field | Meaning |
 | --- | --- |
-| `ready: true` | Chrome CONNECTed to the local proxy. Idle tabs stay aimed. Reload the blocked tab. |
+| `aimed: true` | Chrome CONNECTed to the local proxy. Idle tabs stay aimed. |
+| `ready: true` | Aimed, healthy, daemon live, and the Aluvia tunnel CONNECT returned 200 with an egress IP that is not this VM datacenter. Distinct from `aimed`. Reload the blocked tab. |
 | `needsChromeRestart: true` | Run `chromeCommand` (quits Chrome first, then launches with flags). Then run `aluvia setup` again. Launching without quitting ignores flags. |
 | `code: "payment_required"` | Trial data is used up. Show the human `claim_url`, then run `aluvia auth login`. |
 
 One restart is expected. `setup` tries to do it. If it cannot, run `chromeCommand`, then `aluvia setup` again. Do not launch a second Chrome.
 
-Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab, then `aluvia status`. If that status says `aimed` is false, run setup again.
+Re-running setup while aimed is a no-op if the tunnel is live.
+
+Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab, then `aluvia status`. If that status says `aimed` is false, run setup again. If `aimed` is true but `ready` is false, follow `next` — do not assume the website is down.
 
 ---
 
@@ -68,6 +71,26 @@ Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab
 | Stop the daemon | `aluvia stop` — Chrome aimed at 18787 will break. Prefer `proxy-off`. |
 
 `proxy-on` and `proxy-off` do not restart Chrome.
+
+---
+
+## 503 and 590
+
+A 503 from `gateway.aluvia.io` is a flake, not “the website is down.” Local proxy-chain shows **590 UPSTREAM503** so it is not mistaken for the website’s own 503.
+
+Retry the same session before rotating. The CLI already retries 503/590 on that session (short gaps, a few attempts). A 590 on one echo host is not dead if another host is live. Chrome background CONNECTs also 590 and must not poison status.
+
+`rotate-ip` is the explicit new-IP command. Do not rotate on the first miss. After retries stay dead, the CLI error looks like `Upstream gateway returned 503 (590 UPSTREAM503)` with `code: "upstream_unavailable"` and `next` saying run `aluvia rotate-ip` then reload.
+
+---
+
+## Connection and session
+
+One connection per login. `connectionId` is saved with the login in `config.json` and reused. Setup must not POST a second account connection.
+
+The CLI resolves that id in this order: `--connection-id` flag, then `config.json`, then `proxy.json`.
+
+Session ID is a field on that connection, not its own object. `rotate-ip` PATCHes a new `session_id` on the same connection to get a new IP. There is no session-close or delete-session API. The old session ID is not a leftover reservation. If a session IP is gone, the same session ID can get a new IP.
 
 ---
 
@@ -113,7 +136,7 @@ aluvia auth status
 ```
 
 ```json
-{ "authenticated": true, "source": "config", "provider": "aluvia", "configFile": "~/.aluvia/config.json" }
+{ "authenticated": true, "source": "config", "provider": "aluvia", "configFile": "/workspace/.aluvia/config.json" }
 ```
 
 ```json
@@ -127,13 +150,13 @@ The status payload never includes the key.
 ## Commands
 
 ```
-aluvia setup [--url <page>]        Start proxyd and aim the GUI browser
+aluvia setup [--url <page>]        Start the daemon and aim the GUI browser
 aluvia start                       Start the local egress daemon
 aluvia stop                        Stop the local egress daemon
 aluvia status                      Show daemon status
 aluvia proxy-on [--geo <geo>]      All browser traffic through Aluvia (any geo unless --geo)
 aluvia proxy-off                   Browser traffic direct (daemon stays up)
-aluvia rotate-ip [--geo <geo>]     New exit IP from any geo (or --geo US)
+aluvia rotate-ip [--geo <geo>]     New exit IP (turns proxy on if needed)
 aluvia proxy-provider aluvia       Use the Aluvia network (default)
 aluvia proxy-provider <url>        Use a proxy URL the human pasted
 
@@ -153,58 +176,48 @@ aluvia help [--json]               This list (JSON with --json)
 
 ### Status fields
 
-`aluvia status` (and a successful `setup`) include:
+`aluvia status` includes:
 
 | Field | Meaning |
 | --- | --- |
 | `next` | The next action. Follow it. |
-| `aimed` | Has Chrome CONNECTed to `http://127.0.0.1:18787`? Idle tabs stay aimed. After `next` asks you to reload, the next status/setup requires a CONNECT since that ask. |
-| `egress` | `aluvia` = mobile/residential IP. `direct` = this VM datacenter IP. |
-| `ready` | Aimed and the daemon is up. Reload the tab. |
+| `aimed` | Has Chrome CONNECTed to the local proxy? Idle tabs stay aimed. After next asks you to reload, the following status/setup checks for a CONNECT since that ask. |
+| `egress` | aluvia = mobile/residential IP. direct = this VM datacenter IP. |
+| `ready` | Aluvia tunnel CONNECT returned 200 and the egress IP is not this VM datacenter IP. Distinct from aimed. |
 | `healthy` | The local proxy process is accepting connections. |
-| `needsChromeRestart` | `true` means quit Chrome and run `chromeCommand`. `false` while aimed. |
-| `rules` | `["*"]` = all hosts through Aluvia. `[]` = all hosts direct. |
-| `targetGeo` | Pinned country code, or `null` for all geos. |
+| `needsChromeRestart` | true means run chromeCommand (quit then launch). Then run aluvia setup again. |
+| `rules` | ["*"] = all hosts through Aluvia. [] = all hosts direct. |
+| `targetGeo` | Pinned country code, or null for all geos. |
 | `what` | One-line explanation of each of the fields above. |
+
+`ready` is `aimed` AND `healthy` AND the daemon is live AND that tunnel probe succeeded. Aimed is not enough.
 
 ---
 
-## How the local proxy works
+## Files
 
-```
-┌─────────────────┐     ┌──────────────────────────┐     ┌─────────────────────┐
-│                 │     │                          │     │                     │
-│  GUI Chrome     │────▶│  proxyd                  │────▶│  gateway.aluvia.io  │
-│  (already on    │     │  127.0.0.1:18787         │     │  (mobile IPs)       │
-│   the machine)  │     │                          │     │                     │
-└─────────────────┘     │  egress = aluvia  ──────────────────┘
-                        │  egress = direct  ──────────▶ VM datacenter
-                        └──────────────────────────┘
-```
+Aluvia home is `/workspace/.aluvia` when `/workspace` exists, else `~/.aluvia`.
 
-Chrome always talks to the loopback proxy once it is aimed. The daemon decides per-request whether to send that traffic through Aluvia (or a BYO proxy) or out of the VM directly.
+- `config.json` — login plus saved `connectionId`
+- `proxy.json` — the running daemon (ports, current `sessionId`)
 
-State lives under `/workspace/.aluvia` when `/workspace` exists, otherwise `~/.aluvia` (`config.json`, `install_id`, `proxy.json`, logs). Persist credentials with `aluvia auth` and `aluvia proxy-provider`. Do not point a BYO URL at the local daemon — that loops.
+Never print API keys. Persist credentials with `aluvia auth` and `aluvia proxy-provider`. Do not point a BYO URL at the local daemon — that loops.
 
 ---
 
 ## Agent skill
 
-[`skills/aluvia/SKILL.md`](./skills/aluvia/SKILL.md) is the instruction file computer-use agents follow. `aluvia setup` copies it into the agent skill dirs on the machine.
+[`skills/aluvia/SKILL.md`](./skills/aluvia/SKILL.md) is the instruction file computer-use agents follow.
 
 Use Aluvia when a GUI workflow hits Cloudflare, Access Denied, CAPTCHA, unusual traffic, or a hard 403 on a page that should load — not a normal login wall.
 
-Do not guess hostnames, write PAC/nftables, load an unpacked extension, or use `chrome://settings/system`. Do not `stop` to turn the proxy off.
+`aluvia setup` copies that file into the Aluvia home `skills/` directory and `~/.agents/skills`. If `/workspace` exists, also `/workspace/.agents/skills`. If `~/.grok`, `~/.claude`, `~/.cursor`, `~/.codex`, `~/.hermes`, `~/.openclaw`, or `~/.openclaw/workspace` already exists, it copies into that app’s `skills/` directory. It does not create folders for agents that are not installed. `skillPath` is the first successful copy. `skillPaths` is the full list.
 
 ---
 
 ## This repository
 
-A private workspace. The CLI is the product. Internals live in `packages/cli/src/net`.
-
-| Package | Role |
-| --- | --- |
-| [`packages/cli`](./packages/cli) | `aluvia` / `aluvia-cli` — daemon, setup, auth, skill |
+A private workspace. The released package is **aluvia-cli** (`aluvia` bin) in [`packages/cli`](./packages/cli). Internals live in `packages/cli/src/net`.
 
 ```bash
 npm ci
@@ -213,7 +226,7 @@ npm test
 npm run lint
 ```
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) and [CLAUDE.md](./CLAUDE.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ---
 
