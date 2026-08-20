@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   chromeRestartCommand,
+  isWindows,
   quoteShellArg,
   skipChromeRestart,
   tryRestartChrome,
@@ -12,7 +13,7 @@ import {
 import { attachWaitMs, DEFAULT_ATTACH_WAIT_MS } from '../src/proxy-attach.js';
 
 describe('chrome launch command', () => {
-  test('quits Chrome first, then launches with proxy flags and the page URL', () => {
+  test('quits Chrome first, then launches with proxy flags and the page URL', { skip: isWindows() }, () => {
     const prev = process.env.ALUVIA_CHROME;
     process.env.ALUVIA_CHROME = '/opt/google/chrome/chrome';
     try {
@@ -32,6 +33,61 @@ describe('chrome launch command', () => {
       else process.env.ALUVIA_CHROME = prev;
     }
   });
+
+  test(
+    'Windows: quits chrome.exe with taskkill and launches with proxy flags',
+    { skip: !isWindows() },
+    () => {
+      const prev = process.env.ALUVIA_CHROME;
+      process.env.ALUVIA_CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+      try {
+        const cmd = chromeRestartCommand(18787, 'https://example.com');
+        assert.ok(cmd.startsWith('taskkill /F /IM chrome.exe /T'), `cmd was: ${cmd}`);
+        assert.ok(cmd.includes('start ""'));
+        assert.ok(cmd.includes('--proxy-server=http://127.0.0.1:18787'));
+        assert.ok(cmd.includes('--disable-quic'));
+        assert.ok(cmd.includes('--restore-last-session'));
+        assert.ok(cmd.includes('https://example.com'));
+        // Path with spaces must be quoted for cmd.exe.
+        assert.ok(cmd.includes('"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"'));
+        // No Linux-only tokens.
+        assert.ok(!cmd.includes('pkill'), `cmd should not contain pkill: ${cmd}`);
+        assert.ok(!cmd.includes('sleep 1'), `cmd should not contain sleep: ${cmd}`);
+        const quitAt = cmd.indexOf('taskkill');
+        const launchAt = cmd.indexOf('--proxy-server=');
+        assert.ok(quitAt >= 0 && launchAt > quitAt);
+      } finally {
+        if (prev === undefined) delete process.env.ALUVIA_CHROME;
+        else process.env.ALUVIA_CHROME = prev;
+      }
+    },
+  );
+
+  test(
+    'Windows: quotes URLs containing cmd.exe metacharacters (& % !) to prevent injection',
+    { skip: !isWindows() },
+    () => {
+      const prev = process.env.ALUVIA_CHROME;
+      process.env.ALUVIA_CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+      try {
+        // A URL with `&` is the common case: query strings routinely contain them.
+        // Without quoting, cmd.exe splits the command line at the `&` — Chrome
+        // opens a truncated URL AND anything after it runs as a separate cmd.
+        // That's both a bug and an injection surface if the URL is user-influenced.
+        const urlWithAmp = 'https://example.com/?a=1&b=2';
+        const cmd = chromeRestartCommand(18787, urlWithAmp);
+        assert.ok(cmd.includes(`"${urlWithAmp}"`), `URL with & must be quoted; cmd was: ${cmd}`);
+
+        // Same protection needed for cmd.exe's other metacharacters.
+        const nastyUrl = 'https://example.com/?x=(a|b)^c%y!';
+        const cmd2 = chromeRestartCommand(18787, nastyUrl);
+        assert.ok(cmd2.includes(`"${nastyUrl}"`), `URL with metacharacters must be quoted; cmd was: ${cmd2}`);
+      } finally {
+        if (prev === undefined) delete process.env.ALUVIA_CHROME;
+        else process.env.ALUVIA_CHROME = prev;
+      }
+    },
+  );
 
   test('quotes binaries with spaces', () => {
     assert.strictEqual(
@@ -65,7 +121,7 @@ describe('chrome launch command', () => {
     }
   });
 
-  test('tryRestartChrome launches the configured binary after quitting', async () => {
+  test('tryRestartChrome launches the configured binary after quitting', { skip: isWindows() }, async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aluvia-chrome-'));
     const bin = path.join(dir, 'fake-chrome');
     const marker = path.join(dir, 'launched');

@@ -127,7 +127,14 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(fs.existsSync(path.join(home, 'ext', 'manifest.json')), false);
       assert.ok(typeof result.data.policyPath === 'string');
       assert.strictEqual(result.data.aim, 'policy');
-      assert.ok(String(result.data.chromeCommand).includes('pkill -x google-chrome'));
+      // chromeCommand is platform-specific (issue #24). On Linux the quit
+      // step is `pkill`; on Windows it's `taskkill /F /IM chrome.exe`.
+      // The --proxy-server and --disable-quic flags are cross-platform.
+      if (process.platform === 'win32') {
+        assert.ok(String(result.data.chromeCommand).startsWith('taskkill /F /IM chrome.exe'));
+      } else {
+        assert.ok(String(result.data.chromeCommand).includes('pkill -x google-chrome'));
+      }
       assert.ok(String(result.data.chromeCommand).includes('--proxy-server='));
       assert.ok(String(result.data.chromeCommand).includes('--disable-quic'));
     });
@@ -143,7 +150,11 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(fs.existsSync(path.join(home, 'ext', 'manifest.json')), false);
       assert.strictEqual(result.data.aim, 'flags');
       assert.ok(typeof result.data.persistLimit === 'string');
-      assert.ok(String(result.data.chromeCommand).includes('pkill -x'));
+      if (process.platform === 'win32') {
+        assert.ok(String(result.data.chromeCommand).includes('taskkill /F /IM chrome.exe'));
+      } else {
+        assert.ok(String(result.data.chromeCommand).includes('pkill -x'));
+      }
       assert.ok(String(result.data.chromeCommand).includes(`--proxy-server=http://127.0.0.1:${dataPort}`));
       assert.ok(String(result.data.chromeCommand).includes('--disable-quic'));
     });

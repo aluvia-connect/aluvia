@@ -4,6 +4,7 @@ import path from 'node:path';
 import { isLoopbackHostname } from './net/loopback.js';
 import { controlRequest } from './proxy-control-client.js';
 import { readProxyJson } from './proxy-state.js';
+import { isWindows } from './chrome-launch.js';
 
 export type PolicyWriteResult = {
   wrote: boolean;
@@ -34,6 +35,17 @@ export function chromeProxyPolicyBody(dataPort: number): ChromeProxyPolicyBody {
 function policyDirCandidates(): string[] {
   const override = (process.env.ALUVIA_CHROME_POLICY_DIR ?? '').trim();
   if (override) return [override];
+
+  if (isWindows()) {
+    // Chrome for Windows reads managed policies from ProgramData. Writing
+    // here requires an elevated shell; if the write fails, setup falls
+    // back to launching Chrome with --proxy-server flags directly. Do NOT
+    // fall back to any /etc/... Linux path — the writeFileSync would
+    // "succeed" writing to C:\etc\... which Chrome never reads (issue #24).
+    const programData = (process.env.PROGRAMDATA ?? 'C:\\ProgramData').trim();
+    return [path.join(programData, 'Google', 'Chrome', 'Policies', 'Managed')];
+  }
+
   // Branded Chrome on Linux reads /etc/opt/chrome. Managed is what the
   // Grok Bot image already uses. Home-dir policy files are ignored — do
   // not write them (they make setup report a useless policyPath).
@@ -52,6 +64,11 @@ function tryWritePolicyFile(dir: string, dest: string, body: string): boolean {
     return true;
   } catch {
     // fall through to sudo for system dirs
+  }
+  if (isWindows()) {
+    // Elevation on Windows is out of scope for a background daemon; report
+    // failure so the caller uses the launch-flags path instead.
+    return false;
   }
   if (!dir.startsWith('/etc/')) return false;
   const mkdir = spawnSync('sudo', ['-n', 'mkdir', '-p', dir], { encoding: 'utf8' });
