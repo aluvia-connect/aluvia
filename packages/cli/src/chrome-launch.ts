@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 
 const CANDIDATE_NAMES = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
@@ -18,9 +19,38 @@ const CHROME_PROCESS_NAMES = [
   'chromium-browser',
 ];
 
+const WINDOWS_CANDIDATE_PATHS = [
+  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+];
+
+function windowsLocalAppDataCandidates(): string[] {
+  const localAppData = (process.env.LOCALAPPDATA ?? '').trim();
+  if (!localAppData) return [];
+  return [
+    path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(localAppData, 'Chromium', 'Application', 'chrome.exe'),
+  ];
+}
+
+export function isWindows(): boolean {
+  return process.platform === 'win32';
+}
+
 export function detectChromeBinary(): string {
   const override = (process.env.ALUVIA_CHROME ?? '').trim();
   if (override) return override;
+
+  if (isWindows()) {
+    for (const candidate of WINDOWS_CANDIDATE_PATHS) {
+      if (existsSync(candidate)) return candidate;
+    }
+    for (const candidate of windowsLocalAppDataCandidates()) {
+      if (existsSync(candidate)) return candidate;
+    }
+    // Last resort: hope chrome.exe is on PATH.
+    return 'chrome.exe';
+  }
 
   for (const name of CANDIDATE_NAMES) {
     const found = spawnSync('which', [name], { encoding: 'utf8' });
@@ -40,6 +70,12 @@ export function quoteShellArg(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+function quoteWindowsArg(value: string): string {
+  // cmd.exe/PowerShell tolerate double-quoting for paths with spaces.
+  if (!/\s|"/.test(value)) return value;
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
 export function chromeLaunchArgs(dataPort: number, restoreUrl?: string | null): string[] {
   const args = [`--proxy-server=http://127.0.0.1:${dataPort}`, '--disable-quic', '--restore-last-session'];
   if (restoreUrl) args.push(restoreUrl);
@@ -48,6 +84,19 @@ export function chromeLaunchArgs(dataPort: number, restoreUrl?: string | null): 
 
 /** One shell line: quit existing Chrome, then launch with proxy flags. */
 export function chromeRestartCommand(dataPort: number, restoreUrl?: string | null): string {
+  if (isWindows()) {
+    // cmd.exe one-liner: taskkill is quiet on "process not found" thanks to
+    // 2>NUL, so a first-run Chrome-not-open case doesn't surface a stderr.
+    const quit = 'taskkill /F /IM chrome.exe /T >NUL 2>NUL';
+    const launch = [
+      quoteWindowsArg(detectChromeBinary()),
+      ...chromeLaunchArgs(dataPort, restoreUrl).map(quoteWindowsArg),
+    ].join(' ');
+    // Start /B detaches so the caller shell returns immediately, matching
+    // the Linux `&`-less spawn behavior via child.unref() below.
+    return `${quit} & timeout /T 1 /NOBREAK >NUL & start "" ${launch}`;
+  }
+
   const quit = CHROME_PROCESS_NAMES.map((name) => `pkill -x ${name}`).join('; ');
   const launch = [
     quoteShellArg(detectChromeBinary()),
@@ -61,6 +110,15 @@ export function skipChromeRestart(): boolean {
 }
 
 export function quitExistingChrome(): void {
+  if (isWindows()) {
+    // /T kills any child processes (helpers, renderers). Suppress stderr so
+    // "process not found" doesn't produce noise.
+    spawnSync('taskkill', ['/F', '/IM', 'chrome.exe', '/T'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return;
+  }
   for (const name of CHROME_PROCESS_NAMES) {
     spawnSync('pkill', ['-x', name], { encoding: 'utf8' });
   }
@@ -77,7 +135,14 @@ export async function tryRestartChrome(
   if (skipChromeRestart()) return { launched: false };
 
   quitExistingChrome();
-  spawnSync('sleep', ['1']);
+  if (isWindows()) {
+    // Give the OS a moment to release the profile lock. spawnSync sleep 1s
+    // is fine on Windows too if we shell out, but Node's setTimeout is
+    // simpler and doesn't depend on cmd.exe.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  } else {
+    spawnSync('sleep', ['1']);
+  }
 
   const bin = detectChromeBinary();
   const args = chromeLaunchArgs(dataPort, restoreUrl);
