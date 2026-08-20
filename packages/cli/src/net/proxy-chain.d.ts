@@ -10,9 +10,7 @@ declare module 'proxy-chain' {
     connectionId?: number | string;
   };
 
-  export type PrepareRequestFunctionResult =
-    | { upstreamProxyUrl: string; customTag?: unknown }
-    | undefined;
+  export type PrepareRequestFunctionResult = { upstreamProxyUrl: string; customTag?: unknown } | undefined;
 
   export type PrepareRequestFunction =
     | ((params: PrepareRequestFunctionParams) => PrepareRequestFunctionResult)

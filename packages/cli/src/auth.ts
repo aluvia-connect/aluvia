@@ -23,6 +23,10 @@ const DEVICE_FLOW_TIMEOUT_MS = 600_000;
 export const PAYMENT_REQUIRED_NEXT =
   'Show claim_url to the human. Then run `aluvia auth login` to wait until they finish. When that succeeds, retry.';
 
+/** Used only when the API sent no 402 message (offline, proxy, truncated body). */
+const PAYMENT_REQUIRED_FALLBACK =
+  'Trial data is used up. Show the human claim_url. They open it on their machine, create an account or sign in, Authorize, then Buy data if asked.';
+
 function apiBaseUrl(): string {
   const fromEnv = (process.env.ALUVIA_API_BASE_URL ?? '').trim();
   return (fromEnv || DEFAULT_API_URL).replace(/\/$/, '');
@@ -127,9 +131,12 @@ export async function paymentRequiredPayload(err: PaymentRequiredError): Promise
   } catch {
     // Keep the API claim_url if device-flow init is down.
   }
+  // Prefer the server's wording. It distinguishes an exhausted trial from a
+  // paid account with an empty balance, and telling a paying customer their
+  // "trial" is used up sends them down the wrong path. `next` carries the
+  // agent instruction either way.
   return {
-    error:
-      'Trial data is used up. Show the human claim_url. They open it on their machine, create an account or sign in, Authorize, then Buy data if asked.',
+    error: err.message.trim() || PAYMENT_REQUIRED_FALLBACK,
     code: 'payment_required',
     claim_url: claimUrl,
     next: PAYMENT_REQUIRED_NEXT,
