@@ -1,10 +1,8 @@
-# Contributing to the Aluvia SDK Monorepo
+# Contributing to Aluvia
 
-Thank you for your interest in contributing! This monorepo contains three packages:
+Thank you for your interest in contributing! This repository contains one package:
 
-- **@aluvia/sdk** — Core SDK (TypeScript/Node.js)
-- **@aluvia/cli** — Command-line tools
-- **@aluvia/mcp** — MCP server
+- **aluvia-cli** — Command-line tool (`aluvia` binary)
 
 See **CLAUDE.md** for architecture, workspace layout, and key patterns.
 
@@ -17,38 +15,36 @@ See **CLAUDE.md** for architecture, workspace layout, and key patterns.
 
 ```bash
 # Clone and install
-git clone https://github.com/aluvia-connect/sdk-node.git
-cd sdk-node
+git clone https://github.com/aluvia-connect/aluvia.git
+cd aluvia
 npm ci
 ```
 
-## Monorepo Structure
+## Structure
 
-- All packages live under `packages/`.
-- Root scripts operate on all packages. Use `npm run build`, `npm test`, `npm run lint`, etc.
-- To build/test a single package: `npm run build:sdk`, `npm run build:cli`, `npm run build:mcp`.
-- Only the SDK package is published to npm. Changelogs are maintained in `packages/sdk/CHANGELOG.md` only.
+- The product lives under `packages/cli`.
+- Root scripts operate on that package: `npm run build`, `npm test`, `npm run lint`.
+- Do not publish unless a maintainer asks. The CLI is unpublished until the backend trial ships.
 
 ## Code Style & Formatting
 
 - Use **Prettier** (run `npm run lint:fix` to auto-format).
 - 2-space indentation, single quotes, trailing commas.
-- TypeScript: prefer explicit types, use `unknown` over `any`, export public types from `src/index.ts`.
+- TypeScript: prefer explicit types, use `unknown` over `any`.
 - See CLAUDE.md for naming conventions and error handling.
 
 ## Testing
 
-- Run all tests: `npm test` (SDK tests only; MCP/CLI have their own test scripts if needed).
+- Run tests: `npm test`
 - Use Node.js built-in test runner (`node:test`).
 - Add/modify tests for any new features or bugfixes.
-- Playwright is an **optional peer dependency** for SDK; install it if you need browser automation tests.
+- Tests import from `packages/cli/src/` via the `tsx` loader. No build step needed.
 
 ## Pull Requests & Commits
 
 - All PRs must pass build and tests.
 - Use **Conventional Commits** (see below) for commit messages.
 - No secrets or API keys in code or history.
-- Document public API changes.
 
 ### Commit Message Format
 
@@ -68,17 +64,14 @@ For breaking changes, add `!` after the type/scope and a `BREAKING CHANGE:` foot
 
 - `main` — stable, release-ready code
 - `feature/*`, `fix/*`, `docs/*` — for development
-- Releases use [Semantic Versioning](https://semver.org/). Only SDK is published to npm.
+- Releases use [Semantic Versioning](https://semver.org/).
 
 ## Security
 
 - Never commit secrets (API keys, passwords, tokens).
-- Use environment variables for sensitive values.
+- Persist keys with `aluvia auth <key>`. Never print them.
 - Report vulnerabilities privately (see `SECURITY.md`).
 
 ## Questions?
 
 Open an issue or reach out to the maintainers. We're happy to help!
-| Types/Interfaces | `PascalCase` | `AluviaClientOptions` |
-
-

@@ -8,7 +8,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in `@aluvia/sdk`, please report it responsibly.
+If you discover a security vulnerability in `aluvia-cli`, please report it responsibly.
 
 **Do NOT create public GitHub issues for security vulnerabilities.**
 
@@ -32,16 +32,15 @@ Email **security@aluvia.io** with:
 
 This policy applies to:
 
-- The `@aluvia/sdk` npm package
+- The `aluvia-cli` npm package
 - Code in this repository
 
 For vulnerabilities in the Aluvia API or web services, please contact security@aluvia.io directly.
 
 ## Security Best Practices
 
-When using `@aluvia/sdk`:
+When using `aluvia-cli`:
 
-1. **Never commit API keys** — use environment variables
-2. **Don't log `connection.getUrl()`** — it contains credentials in gateway mode
+1. **Never commit API keys** — persist them with `aluvia auth <key>`
+2. **Never print API keys** — CLI JSON must not echo secrets
 3. **Keep dependencies updated** — run `npm audit` regularly
-4. **Use the latest SDK version** — we patch security issues promptly

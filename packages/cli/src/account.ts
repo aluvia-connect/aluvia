@@ -7,7 +7,7 @@ export async function handleAccount(args: string[]): Promise<void> {
   if (!subcommand) {
     const api = requireApi();
     const account = await api.account.get();
-    return output({ account });
+    return output({ account, next: 'This is account data. For the proxy, run `aluvia status`.' });
   }
 
   if (subcommand === 'usage') {
@@ -26,8 +26,14 @@ export async function handleAccount(args: string[]): Promise<void> {
 
     const api = requireApi();
     const usage = await api.account.usage.get({ start, end });
-    return output({ usage });
+    return output({ usage, next: 'This is usage data. For the proxy, run `aluvia status`.' });
   }
 
-  return output({ error: `Unknown account subcommand: '${subcommand}'.` }, 1);
+  return output(
+    {
+      error: `Unknown account subcommand: '${subcommand}'.`,
+      next: 'Run `aluvia account` or `aluvia account usage`.',
+    },
+    1,
+  );
 }

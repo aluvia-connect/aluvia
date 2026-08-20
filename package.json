@@ -2,48 +2,37 @@
   "name": "aluvia-monorepo",
   "version": "1.4.1",
   "private": true,
-  "description": "Aluvia SDK monorepo - smart proxy for automation workloads and AI agents",
+  "description": "Aluvia CLI — local proxy for computer-use agents",
   "license": "MIT",
   "author": "Aluvia",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aluvia-connect/sdk-node.git"
+    "url": "git+https://github.com/aluvia-connect/aluvia.git"
   },
   "homepage": "https://aluvia.io",
   "bugs": {
-    "url": "https://github.com/aluvia-connect/sdk-node/issues"
+    "url": "https://github.com/aluvia-connect/aluvia/issues"
   },
   "type": "module",
   "workspaces": [
-    "packages/sdk",
-    "packages/cli",
-    "packages/mcp"
+    "packages/cli"
   ],
   "scripts": {
-    "publish:dry-run": "npm publish --dry-run -w @aluvia/sdk && npm publish --dry-run -w @aluvia/cli && npm publish --dry-run -w @aluvia/mcp",
-    "publish:cli": "npm publish -w @aluvia/cli",
-    "publish:mcp": "npm publish -w @aluvia/mcp",
-    "publish:sdk": "npm publish -w @aluvia/sdk",
-    "build:all": "npm run build:sdk && npm run build:cli && npm run build:mcp",
-    "build:sdk": "npm run build -w @aluvia/sdk",
-    "build:cli": "npm run build -w @aluvia/cli",
-    "build:mcp": "npm run build -w @aluvia/mcp",
-    "test:all": "npm test -w @aluvia/sdk && npm test -w @aluvia/mcp",
-    "test:sdk": "npm test -w @aluvia/sdk",
-    "test:mcp": "npm test -w @aluvia/mcp",
-    "lint": "npm run lint -w @aluvia/sdk && npm run lint -w @aluvia/cli",
-    "lint:fix": "npm run lint:fix -w @aluvia/sdk && npm run lint:fix -w @aluvia/cli"
+    "publish:dry-run": "npm publish --dry-run -w aluvia-cli --access public",
+    "publish:cli": "npm publish -w aluvia-cli --access public",
+    "build": "npm run build -w aluvia-cli",
+    "build:cli": "npm run build -w aluvia-cli",
+    "test": "npm test -w aluvia-cli",
+    "test:cli": "npm test -w aluvia-cli",
+    "lint": "npm run lint -w aluvia-cli",
+    "lint:fix": "npm run lint:fix -w aluvia-cli"
   },
   "engines": {
     "node": ">=18"
   },
   "keywords": [
+    "cli",
     "proxy",
-    "ai-agent",
-    "playwright",
-    "puppeteer",
-    "aluvia",
-    "mcp",
-    "model-context-protocol"
+    "aluvia"
   ]
 }

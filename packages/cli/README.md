@@ -1,207 +1,51 @@
-# @aluvia/cli
+# aluvia-cli
 
-The official command-line interface for [Aluvia](https://aluvia.io) — launch and manage browser sessions with automatic unblocking, smart routing, and resident proxy daemons.
+The Aluvia CLI. A local proxy that sends a computer-use agent's existing Chrome through residential and mobile carrier IPs.
 
-## Installation
+Chrome aims at `http://127.0.0.1:18787`. The daemon (control `18788`) either sends that traffic through Aluvia or out of the VM directly. All commands print JSON. Follow `next`. Never print API keys.
 
-```bash
-npm install -g @aluvia/cli
-```
+The full product write-up is in the [repository README](../../README.md). The agent instruction file is [skills/aluvia/SKILL.md](./skills/aluvia/SKILL.md).
 
-## Authentication
+## Install
 
 ```bash
-aluvia auth
+npx aluvia-cli setup
 ```
 
-Open the link it prints, confirm the code, and you're done. Your API key is saved to `~/.aluvia/config.json`.
+Or `npm i -g aluvia-cli` and run `aluvia`. Node.js 18+.
 
-```bash
-aluvia auth status   # check whether you're authenticated
-aluvia auth logout   # remove the stored API key
+A first setup starts a free trial. No API key. The human does not SSH or edit env vars — they paste a key or proxy URL in chat, and the agent runs the command.
+
+## Commands
+
+```
+aluvia setup [--url <page>]        Start proxyd and aim the GUI browser
+aluvia start                       Start the local egress daemon
+aluvia stop                        Stop the local egress daemon
+aluvia status                      Show daemon status
+aluvia proxy-on [--geo <geo>]      All browser traffic through Aluvia (any geo unless --geo)
+aluvia proxy-off                   Browser traffic direct (daemon stays up)
+aluvia rotate-ip [--geo <geo>]     New exit IP from any geo (or --geo US)
+aluvia proxy-provider aluvia       Use the Aluvia network (default)
+aluvia proxy-provider <url>        Use a proxy URL the human pasted
+
+aluvia account                     Account info
+aluvia account usage [--start --end]
+aluvia geos                        List available geos
+
+aluvia auth <key>                  Save an API key the human pasted
+aluvia auth login                  Wait until the human finishes claim_url
+aluvia auth status                 Whether you are authenticated
+aluvia help [--json]               Command list as JSON
 ```
 
-### Using an environment variable instead
+`proxy-on` / `proxy-off` do not restart Chrome. Prefer `proxy-off` over `stop`. `--geo US` only when a site requires a country; omit it to use every geo.
 
-For CI or scripted environments you can skip `aluvia auth` and set the key directly. The environment variable always takes precedence over a key stored by `aluvia auth`.
+## Trial used up
 
-```bash
-export ALUVIA_API_KEY="aluvia_..."
-```
+`{"code":"payment_required"}` — show the human `claim_url`. They open it on their machine, enter email, type the 6-digit code, Authorize, then Buy data if asked. Run `aluvia auth login` to wait. Do not show a second URL.
 
-You can find your API key in the dashboard's **API & SDKs** section. Add it to a `.env` file if you prefer (never commit it).
-
-## Features
-
-- **Resident Browser Sessions**: Launches a headless Chromium instance managed by a background daemon.
-- **Auto-Unblocking**: Automatically detects blocks (403s, CAPTCHAs) and rotates IPs/headers to bypass them.
-- **Script Injection**: Run ephemeral scripts against the browser session with zero boilerplate.
-- **Live Control**: Rotate IPs, change geo-targeting, and update routing rules on running sessions.
-- **JSON Output**: All commands output structured JSON, making this CLI ideal for building agents and tools.
-
-## Command Reference
-
-Run `aluvia help` for a quick list of commands, or `aluvia help --json` for machine-readable output.
-
-### `session start`
-
-Starts a new browser session. This spawns a background daemon that manages the browser and proxy.
-
-```bash
-aluvia session start <url> [options]
-```
-
-**Options:**
-
-- `--auto-unblock`: **(Recommended)** Enable automatic block detection and unblocking.
-- `--headful`: Show the browser window (useful for debugging).
-- `--run <script>`: Run a JavaScript/TypeScript module immediately after the session starts.
-- `--browser-session <name>`: Assign a custom name to the session (default: auto-generated like `swift-falcon`).
-- `--connection-id <id>`: Reuse an existing Aluvia connection ID (persists rules/history).
-- `--disable-block-detection`: Turn off all block detection features.
-
-**Examples:**
-
-```bash
-# Start a session with auto-unblocking
-aluvia session start https://example.com --auto-unblock
-
-# Start a visible browser (headful)
-aluvia session start https://google.com --headful
-
-# Run a script and exit
-aluvia session start https://example.com --auto-unblock --run ./scrape.mjs
-```
-
-### `session list`
-
-Lists all active browser sessions managed by the CLI.
-
-```bash
-aluvia session list
-```
-
-**Output:**
-
-```json
-{
-  "sessions": [
-    {
-      "browserSession": "swift-falcon",
-      "pid": 12345,
-      "startUrl": "https://example.com",
-      "cdpUrl": "http://127.0.0.1:39201",
-      "connectionId": 5592,
-      "autoUnblock": true
-    }
-  ],
-  "count": 1
-}
-```
-
-### `session get`
-
-Retrieves detailed information about a specific session, including its CDP endpoint and Proxy URL.
-
-```bash
-aluvia session get [--browser-session <name>]
-```
-
-If only one session is running, it is selected automatically.
-
-### `session close`
-
-Stops a browser session and kills the background daemon.
-
-```bash
-aluvia session close [--browser-session <name>] [--all]
-```
-
-- `--all`: Close all running sessions.
-
-### `session rotate-ip`
-
-Forces an IP rotation for the current session. The connection ID remains the same, but the exit node changes.
-
-```bash
-aluvia session rotate-ip [--browser-session <name>]
-```
-
-### `session set-geo`
-
-Updates the target geography for the session's exit node.
-
-```bash
-aluvia session set-geo <geo_code> [--browser-session <name>]
-aluvia session set-geo --clear
-```
-
-- `<geo_code>`: A geo code (e.g., `us`, `gb`, `de`). See `aluvia geos` for a full list.
-- `--clear`: Remove geo targeting (use any available IP).
-
-### `session set-rules`
-
-Updates the routing rules for the session. These rules determine which domains are routed through Aluvia's proxy network versus direct connections.
-
-```bash
-# Append rules
-aluvia session set-rules "example.com,api.example.com"
-
-# Remove rules
-aluvia session set-rules --remove "example.com"
-```
-
-### `account` & `geos`
-
-- `aluvia account`: View your current balance and account status.
-- `aluvia account usage`: View usage statistics (bandwidth, requests).
-  - `--start <ISO8601>` / `--end <ISO8601>`: Filter by date range.
-- `aluvia geos`: List all available regions for geo-targeting.
-
-## Scripting (`--run`)
-
-You can pass a script to `session start` to execute automation logic immediately. The CLI injects `page`, `browser`, and `context` (Playwright objects) into the global scope.
-
-**script.mjs:**
-
-```javascript
-// 'page' is already navigated to the start URL
-console.log('Title:', await page.title());
-
-// You can use standard Playwright API
-await page.click('button.login');
-console.log('Logged in!');
-
-// The session closes automatically when this script finishes
-```
-
-**Run it:**
-
-```bash
-aluvia session start https://example.com --auto-unblock --run script.mjs
-```
-
-## Connecting from SDK
-
-You can also connect to a CLI-managed session from your own Node.js code using the `@aluvia/sdk` package.
-
-```typescript
-import { connect } from '@aluvia/sdk';
-
-// Connects to the active session
-const { page, browser } = await connect();
-
-await page.goto('https://another-site.com');
-```
-
-See the [SDK Documentation](../sdk/README.md) for more details.
-
-## Troubleshooting
-
-- **"No API key found"**: Run `aluvia auth` to log in, or export `ALUVIA_API_KEY` in your shell.
-- **`aluvia auth` times out**: Open the printed link in a browser and confirm the code matches.
-- **"Browser process exited unexpectedly"**: The daemon failed to start. Check if Chrome/Chromium is installed or if there are port conflicts.
-- **"Invalid session name"**: Session names must contain only letters, numbers, hyphens, and underscores.
+They can also paste a key (`aluvia auth <key>`) or their own proxy (`aluvia proxy-provider <url>`).
 
 ## License
 
