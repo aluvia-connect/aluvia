@@ -63,6 +63,32 @@ describe('chrome launch command', () => {
     },
   );
 
+  test(
+    'Windows: quotes URLs containing cmd.exe metacharacters (& % !) to prevent injection',
+    { skip: !isWindows() },
+    () => {
+      const prev = process.env.ALUVIA_CHROME;
+      process.env.ALUVIA_CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+      try {
+        // A URL with `&` is the common case: query strings routinely contain them.
+        // Without quoting, cmd.exe splits the command line at the `&` — Chrome
+        // opens a truncated URL AND anything after it runs as a separate cmd.
+        // That's both a bug and an injection surface if the URL is user-influenced.
+        const urlWithAmp = 'https://example.com/?a=1&b=2';
+        const cmd = chromeRestartCommand(18787, urlWithAmp);
+        assert.ok(cmd.includes(`"${urlWithAmp}"`), `URL with & must be quoted; cmd was: ${cmd}`);
+
+        // Same protection needed for cmd.exe's other metacharacters.
+        const nastyUrl = 'https://example.com/?x=(a|b)^c%y!';
+        const cmd2 = chromeRestartCommand(18787, nastyUrl);
+        assert.ok(cmd2.includes(`"${nastyUrl}"`), `URL with metacharacters must be quoted; cmd was: ${cmd2}`);
+      } finally {
+        if (prev === undefined) delete process.env.ALUVIA_CHROME;
+        else process.env.ALUVIA_CHROME = prev;
+      }
+    },
+  );
+
   test('quotes binaries with spaces', () => {
     assert.strictEqual(
       quoteShellArg('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),

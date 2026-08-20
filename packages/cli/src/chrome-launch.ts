@@ -71,9 +71,21 @@ export function quoteShellArg(value: string): string {
 }
 
 function quoteWindowsArg(value: string): string {
-  // cmd.exe/PowerShell tolerate double-quoting for paths with spaces.
-  if (!/\s|"/.test(value)) return value;
-  return `"${value.replace(/"/g, '\\"')}"`;
+  // cmd.exe treats these characters as unquoted metacharacters:
+  //   space, tab, ", &, |, <, >, ^, (, ), %, !
+  // Any of them in an unquoted argument (a URL with ?a=1&b=2 for example)
+  // splits the command line, which corrupts the intent AND lets a caller
+  // that influences restoreUrl inject cmd.exe commands into the copy-
+  // pasteable chromeCommand.
+  //
+  // Empty strings must also be quoted, otherwise cmd.exe drops them.
+  //
+  // Inside a double-quoted token cmd.exe treats &|<>^() literally, so
+  // wrapping is enough; embedded double-quotes are escaped as \".
+  if (value === '' || /[\s"&|<>^()%!]/.test(value)) {
+    return `"${value.replace(/"/g, '\\"')}"`;
+  }
+  return value;
 }
 
 export function chromeLaunchArgs(dataPort: number, restoreUrl?: string | null): string[] {
