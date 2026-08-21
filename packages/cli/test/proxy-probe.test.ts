@@ -197,6 +197,47 @@ describe('probeAluviaTunnel', { concurrency: 1 }, () => {
     }
   });
 
+  test('server reset immediately after CONNECT 200 does not crash the process', async () => {
+    // Regression test: destroying an in-flight socket/request during cleanup can
+    // emit an async 'error' event on more than one socket (the TLS socket failing
+    // its handshake AND the underlying raw socket seeing the reset). Both must be
+    // swallowed by finish() instead of left unhandled, or Node throws and kills
+    // the process.
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('9.9.9.9');
+    });
+    server.on('connect', (req, socket) => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      // Hard-reset the connection right after CONNECT succeeds, before any TLS
+      // bytes are exchanged. This can cause both the TLS handshake and the raw
+      // socket to independently emit 'error'.
+      socket.destroy();
+    });
+    const port: number = await new Promise((resolve, reject) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address();
+        resolve(typeof addr === 'object' && addr ? addr.port : 0);
+      });
+      server.on('error', reject);
+    });
+
+    const uncaught: unknown[] = [];
+    const onUncaught = (err: unknown) => uncaught.push(err);
+    process.on('uncaughtException', onUncaught);
+    try {
+      const result = await probeAluviaTunnel(port);
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.ip, null);
+      // Give any queued async 'error' events a chance to surface before asserting.
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepStrictEqual(uncaught, []);
+    } finally {
+      process.removeListener('uncaughtException', onUncaught);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   test('590 then success on the next attempt of the same host is ok', async () => {
     process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '10';
     process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';

@@ -228,9 +228,15 @@ export async function probeAluviaTunnel(dataPort: number, targetUrl?: string): P
       if (connectTimer) clearTimeout(connectTimer);
       if (tlsTimer) clearTimeout(tlsTimer);
       if (getTimer) clearTimeout(getTimer);
+      // Destroying an in-flight socket/request can emit an async 'error' event.
+      // Swallow it instead of stripping listeners first, which would leave the
+      // emission unhandled and crash the process (Node throws on unhandled 'error').
       tlsSocket?.removeAllListeners();
+      tlsSocket?.on('error', () => {});
       connectSocket?.removeAllListeners();
+      connectSocket?.on('error', () => {});
       req.removeAllListeners();
+      req.on('error', () => {});
       tlsSocket?.destroy();
       connectSocket?.destroy();
       req.destroy();
