@@ -25,7 +25,6 @@ const ENV_KEYS = [
   'ALUVIA_PROBE_RETRY_ATTEMPTS',
 ] as const;
 
-const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
 const DATA_PORT_UNHEALTHY = 'proxyd data port is not healthy. Run `aluvia status`.';
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -283,12 +282,16 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     assert.strictEqual(rotated.data.rotated, true);
   });
 
-  test('proxy-on after stop is not-running', async () => {
+  test('proxy-on after stop auto-starts the daemon', async () => {
     const stopped = await captureOutput(() => handleProxy(['stop']));
     assert.strictEqual(stopped.isError, false);
+    assert.strictEqual(readProxyJson()?.pid, null);
     const result = await captureOutput(() => handleProxy(['proxy-on']));
-    assert.strictEqual(result.isError, true);
-    assert.strictEqual(result.data.error, NOT_RUNNING);
+    assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+    assert.strictEqual(result.data.egress, 'aluvia');
+    const after = readProxyJson();
+    assert.ok(after?.pid);
+    assert.strictEqual(after.ready, true);
   });
 
   test('PATCH failure leaves memory unchanged', async () => {

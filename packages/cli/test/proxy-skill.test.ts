@@ -107,6 +107,9 @@ describe('proxy skill install', () => {
     assert.ok(!dirs.includes(path.join(process.cwd(), '.grok', 'skills')));
     assert.ok(!dirs.includes(path.join(process.cwd(), '.claude', 'skills')));
     assert.ok(!dirs.includes(path.join(process.cwd(), '.agents', 'skills')));
+    assert.ok(!dirs.includes(path.join(home, 'agent-data', 'workflows')));
+    assert.ok(!dirs.some((dir) => dir.includes(`${path.sep}managed-skills`)));
+    assert.ok(!dirs.some((dir) => dir.includes(`${path.sep}plugin-skills`)));
   });
 
   test('default dirs include a host extra only when that agent home exists', () => {
@@ -138,5 +141,35 @@ describe('proxy skill install', () => {
     assert.ok(result.skillPaths.includes(hermesSkill));
     assert.ok(fs.existsSync(hermesSkill));
     assert.strictEqual(fs.readFileSync(hermesSkill, 'utf8'), fs.readFileSync(bundledSkillPath()!, 'utf8'));
+  });
+
+  test('existing ~/agent-data/workflows gets the skill', () => {
+    const workflows = path.join(home, 'agent-data', 'workflows');
+    fs.mkdirSync(workflows, { recursive: true });
+    const dest = path.join(workflows, 'aluvia', 'SKILL.md');
+    const dirs = skillInstallDirs();
+    assert.ok(dirs.includes(workflows));
+    const result = installProxySkill();
+    assert.strictEqual(result.error, undefined);
+    assert.ok(result.skillPaths.includes(dest));
+    assert.ok(fs.existsSync(dest));
+    assert.strictEqual(fs.readFileSync(dest, 'utf8'), fs.readFileSync(bundledSkillPath()!, 'utf8'));
+  });
+
+  test('missing agent-data is not created', () => {
+    const agentData = path.join(home, 'agent-data');
+    assert.ok(!fs.existsSync(agentData));
+    const result = installProxySkill();
+    assert.strictEqual(result.error, undefined);
+    assert.ok(!result.skillPaths.some((p) => p.includes(`${path.sep}agent-data${path.sep}`)));
+    assert.ok(!fs.existsSync(agentData));
+  });
+
+  test('agent-data without workflows is not given a workflows tree', () => {
+    const agentData = path.join(home, 'agent-data');
+    fs.mkdirSync(agentData);
+    const result = installProxySkill();
+    assert.ok(!result.skillPaths.some((p) => p.includes(`${path.sep}workflows${path.sep}`)));
+    assert.ok(!fs.existsSync(path.join(agentData, 'workflows')));
   });
 });

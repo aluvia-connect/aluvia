@@ -17,7 +17,7 @@ import {
   saveUpstream,
 } from './config.js';
 import { output } from './cli.js';
-import { getCliLaunch } from './cli-path.js';
+import { getCliLaunch, writePathBin } from './cli-path.js';
 import { chromeRestartCommand, tryRestartChrome } from './chrome-launch.js';
 import { attachWaitMs, waitForExternalConnect, writeChromeProxyPolicy } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
@@ -129,6 +129,21 @@ function resolveConnectionId(flagConnectionId?: number, existing?: ProxyJson | n
 /** Live pid check only. A not-live ProxyJson is still a ProxyJson. */
 function isLive(state: ProxyJson | null): boolean {
   return state != null && state.pid != null && isProcessAlive(state.pid);
+}
+
+/** Restart args from saved proxy.json, overlaying explicit CLI flags. */
+function savedDaemonArgs(existing: ProxyJson, args: string[] = []): string[] {
+  const parsed = parseStartArgs(args);
+  const dataPort = args.includes('--port') ? parsed.dataPort : existing.dataPort;
+  const controlPort = args.includes('--control-port') ? parsed.controlPort : existing.controlPort;
+  const connectionId = resolveConnectionId(parsed.connectionId, existing);
+  return [
+    '--port',
+    String(dataPort),
+    '--control-port',
+    String(controlPort),
+    ...(connectionId != null ? ['--connection-id', String(connectionId)] : []),
+  ];
 }
 
 const DATACENTER_IP = '104.30.175.37';
@@ -729,6 +744,26 @@ async function startDaemon(args: string[]): Promise<{ json: Record<string, unkno
   });
 }
 
+/**
+ * If proxy.json exists and the daemon is dead (dead pid or both ports down
+ * with nothing bound), start it with the saved ports and connectionId.
+ * Does not kill Chrome. Does not SIGTERM a live pid that still holds a port.
+ */
+async function ensureRunningDaemon(args: string[] = []): Promise<boolean> {
+  const existing = readProxyJson();
+  if (!existing) return false;
+  if (isLive(existing) && (await bothPortsAccept(existing))) return true;
+
+  if (isLive(existing)) {
+    const dataTaken = await portBusy(existing.dataPort);
+    const controlTaken = await portBusy(existing.controlPort);
+    if (dataTaken || controlTaken) return false;
+  }
+
+  const started = await startDaemon(savedDaemonArgs(existing, args));
+  return started.healthy === true;
+}
+
 async function handleStart(args: string[]): Promise<void> {
   const existing = readProxyJson();
   if (existing && isLive(existing)) {
@@ -808,6 +843,10 @@ async function outputMaybeStamp(data: Record<string, unknown>, exitCode = 0): Pr
 }
 
 async function runAttach(args: string[]): Promise<AttachOutcome> {
+  const existing = readProxyJson();
+  if (existing) {
+    await ensureRunningDaemon(args);
+  }
   if (!isLive(readProxyJson())) {
     await startDaemon(args);
   }
@@ -966,6 +1005,7 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
 async function handleSetup(args: string[]): Promise<void> {
   parseRestoreUrl(args);
   const skill = installProxySkill();
+  const binPath = writePathBin();
   const priorSessionId = (readProxyJson()?.sessionId ?? '').trim() || null;
   // 1. Reuse the one saved connection (never POST a second).
   const result = await runAttach(args);
@@ -1026,6 +1066,7 @@ async function handleSetup(args: string[]): Promise<void> {
     needsChromeRestart: !aimed,
     skillPaths: skill.skillPaths,
     ...(skill.error ? { skillError: skill.error } : {}),
+    ...(binPath ? { binPath } : {}),
     ...attachPublicFields(result),
     ...(unavailable ? upstreamUnavailablePayload() : {}),
   });
@@ -1101,6 +1142,7 @@ export async function recycleDaemonIfRunning(): Promise<{ recycled: boolean }> {
 }
 
 async function handleStatus(): Promise<void> {
+  await ensureRunningDaemon();
   const state = readProxyJson();
   try {
     const { json } = await controlRequest('GET', '/status');
@@ -1141,7 +1183,7 @@ async function handleStatus(): Promise<void> {
       output(
         {
           error: NOT_RUNNING,
-          next: 'Run `aluvia start` if Chrome is already aimed, or `aluvia setup`.',
+          next: 'Run `aluvia setup`.',
         },
         1,
       );
@@ -1151,12 +1193,13 @@ async function handleStatus(): Promise<void> {
 }
 
 async function requireHealthyDaemon(): Promise<void> {
+  await ensureRunningDaemon();
   const state = readProxyJson();
   if (!state || state.pid == null || !isProcessAlive(state.pid)) {
     output(
       {
         error: NOT_RUNNING,
-        next: 'Run `aluvia start` if Chrome is already aimed, or `aluvia setup`.',
+        next: 'Run `aluvia setup`.',
       },
       1,
     );

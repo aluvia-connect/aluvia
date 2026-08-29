@@ -21,6 +21,9 @@ const ENV_KEYS = [
   'ALUVIA_PROXY_PORT',
   'ALUVIA_PROXY_CONTROL_PORT',
   'ALUVIA_CONTROL_TIMEOUT_MS',
+  'ALUVIA_PROBE_URL',
+  'ALUVIA_PROBE_RETRY_DELAY_MS',
+  'ALUVIA_PROBE_RETRY_ATTEMPTS',
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -362,13 +365,19 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
 
     const status = await captureOutput(() => handleProxy(['status']));
     assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
-    assert.strictEqual(status.data.healthy, false);
+    assert.strictEqual(status.data.healthy, true);
     assert.ok(typeof status.data.next === 'string');
-    assert.match(String(status.data.next), /aluvia setup/);
+    assert.ok(!String(status.data.next).includes('Daemon is not running'));
+    assert.ok(!/Run `aluvia start`/.test(String(status.data.next)));
+    assert.ok(readProxyJson()?.pid);
     assert.ok(status.data.what);
   });
 
-  test('status when aimed and daemon is dead tells the agent to start without quitting Chrome', async () => {
+  test('status when aimed and daemon is dead auto-starts without quitting Chrome', async () => {
+    api.state.rules = ['*'];
+    process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '1';
+    process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '1';
+    process.env.ALUVIA_PROBE_URL = 'https://127.0.0.1:1/';
     writeProxyJson({
       pid: 999999992,
       ready: false,
@@ -390,12 +399,19 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     const status = await captureOutput(() => handleProxy(['status']));
     assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
     assert.strictEqual(status.data.aimed, true);
-    assert.strictEqual(status.data.egress, 'aluvia');
-    assert.match(String(status.data.next), /aluvia start/);
-    assert.match(String(status.data.next), /Do not quit Chrome/);
+    assert.strictEqual(status.data.healthy, true);
+    const after = readProxyJson();
+    assert.ok(after?.pid);
+    assert.notStrictEqual(after.pid, 999999992);
+    assert.ok(!/aluvia start/.test(String(status.data.next)));
+    assert.ok(!/Do not quit Chrome/.test(String(status.data.next)));
   });
 
-  test('status stays aimed when the last CONNECT is 90s old and no probe is pending', async () => {
+  test('status stays aimed when the last CONNECT is 90s old and the daemon is dead', async () => {
+    api.state.rules = ['*'];
+    process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '1';
+    process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '1';
+    process.env.ALUVIA_PROBE_URL = 'https://127.0.0.1:1/';
     writeProxyJson({
       pid: 999999993,
       ready: false,
@@ -419,7 +435,10 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
     assert.strictEqual(status.data.aimed, true);
     assert.strictEqual(status.data.needsChromeRestart, false);
-    assert.match(String(status.data.next), /aluvia start/);
+    assert.strictEqual(status.data.healthy, true);
+    assert.ok(readProxyJson()?.pid);
+    assert.notStrictEqual(readProxyJson()?.pid, 999999993);
+    assert.ok(!/aluvia start/.test(String(status.data.next)));
   });
 
   test('stop when already dead', async () => {
