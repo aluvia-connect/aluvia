@@ -71,6 +71,20 @@ describe('proxy.json', () => {
         { status: 'needs_ui', method: null, expectConnectAfter: 1, reloadAskedAt: null },
         { hostname: 'example.com', at: now },
       ),
+      true,
+    );
+    assert.strictEqual(
+      isLiveAim(
+        { status: 'needs_ui', method: null, expectConnectAfter: now + 1, reloadAskedAt: null },
+        { hostname: 'example.com', at: now },
+      ),
+      false,
+    );
+    assert.strictEqual(
+      isLiveAim(
+        { status: 'needs_ui', method: null, expectConnectAfter: null, reloadAskedAt: null },
+        { hostname: 'example.com', at: now },
+      ),
       false,
     );
 
@@ -82,5 +96,20 @@ describe('proxy.json', () => {
     assert.strictEqual(after.aimed, true);
     assert.strictEqual(after.failed, false);
     assert.strictEqual(after.attach.reloadAskedAt, null);
+
+    const landed = resolveAimProbe(
+      { status: 'needs_ui', method: null, expectConnectAfter: 1, reloadAskedAt: null },
+      { hostname: 'accounts.google.com', at: now },
+    );
+    assert.strictEqual(landed.aimed, true);
+    assert.strictEqual(landed.failed, false);
+    assert.strictEqual(landed.attach.status, 'verified');
+    assert.strictEqual(landed.attach.expectConnectAfter, 1);
+    const tooOld = resolveAimProbe(
+      { status: 'needs_ui', method: null, expectConnectAfter: now + 1, reloadAskedAt: null },
+      { hostname: 'accounts.google.com', at: now },
+    );
+    assert.strictEqual(tooOld.aimed, false);
+    assert.strictEqual(tooOld.attach.status, 'needs_ui');
   });
 });

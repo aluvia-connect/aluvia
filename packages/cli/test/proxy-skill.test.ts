@@ -49,6 +49,8 @@ describe('proxy skill install', () => {
     assert.ok(body.includes('without quitting'));
     assert.ok(body.includes('aluvia setup'));
     assert.ok(body.includes('--url'));
+    assert.ok(!body.includes('`--url <page>` is optional'));
+    assert.ok(body.includes('required when Chrome is not already aimed'));
     assert.ok(body.includes('chromeCommand'));
     assert.ok(body.includes('claim_url'));
     assert.ok(body.includes('aimed'));

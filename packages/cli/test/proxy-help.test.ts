@@ -41,6 +41,12 @@ describe('proxy help', () => {
       setup?.options.map((o) => (o as { flag?: string }).flag),
       ['--url <url>'],
     );
+    const urlOpt = setup?.options.find((o) => (o as { flag?: string }).flag === '--url <url>') as
+      | { description?: string }
+      | undefined;
+    assert.ok(typeof urlOpt?.description === 'string');
+    assert.ok(!urlOpt.description.toLowerCase().includes('optional'));
+    assert.match(urlOpt.description, /Required when Chrome is not already aimed/);
     assert.deepStrictEqual(start?.options, []);
   });
 

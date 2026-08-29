@@ -31,6 +31,7 @@ import { installProxySkill } from './proxy-skill.js';
 import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
+  defaultAttach,
   egressFromRules,
   isLiveAim,
   nextAsksReload,
@@ -96,7 +97,7 @@ function parseRestoreUrl(args: string[]): string | null {
     output(
       {
         error: `Invalid --url: '${parsed.raw ?? ''}'. Use an http(s) page URL.`,
-        next: 'Omit --url, or pass a blocked page URL from the address bar.',
+        next: 'Pass --url <https-page> (an http(s) page URL).',
       },
       1,
     );
@@ -434,6 +435,29 @@ function rotateProbeFailure(probe: TunnelProbe): { error: string; code: string; 
 
 function aimedFrom(state: ProxyJson | null): boolean {
   return isLiveAim(state?.attach, state?.lastConnect);
+}
+
+async function attachAlreadyAimed(state: ProxyJson | null): Promise<boolean> {
+  if (!state) return false;
+  const last = isLive(state) ? await readLastConnect() : state.lastConnect;
+  const probe = resolveAimProbe(state.attach ?? defaultAttach(), last);
+  return probe.aimed && !probe.failed;
+}
+
+function failMissingSetupUrl(extra?: Record<string, unknown>): never {
+  output(
+    {
+      error: 'setup requires --url <https-page> so Chrome opens a real page after the restart.',
+      next: 'Pass --url <https-page> (the blocked address-bar URL) and run `aluvia setup` again.',
+      aimed: false,
+      ready: false,
+      needsChromeRestart: true,
+      restoreUrl: null,
+      status: 'needs_ui',
+      ...extra,
+    },
+    1,
+  );
 }
 
 async function readLastConnect(): Promise<LastConnectSnapshot> {
@@ -912,6 +936,10 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
     };
   }
 
+  if (!restoreUrl) {
+    failMissingSetupUrl();
+  }
+
   const expectConnectAfter = Date.now();
   await persistAttach({
     status: 'needs_ui',
@@ -940,17 +968,18 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
   }
 
   attachProgress(`waiting up to ${timeoutMs}ms for Chrome to CONNECT to http://127.0.0.1:${dataPort}`);
-  const seen = await waitForExternalConnect({ timeoutMs, sinceMs: expectConnectAfter });
-  const verifiedNow = seen && readProxyJson()?.attach.status === 'verified';
+  await waitForExternalConnect({ timeoutMs, sinceMs: expectConnectAfter });
+  const lastAfter = await readLastConnect();
+  const latest = readProxyJson();
+  const after = latest ? resolveAimProbe(latest.attach, lastAfter) : null;
 
-  if (verifiedNow) {
-    const attach: ProxyAttachState = {
+  if (after?.aimed && !after.failed) {
+    await persistAttach({
       status: 'verified',
       method: aim,
       expectConnectAfter,
       reloadAskedAt: null,
-    };
-    await persistAttach(attach);
+    });
     return {
       status: 'verified',
       method: aim,
@@ -1027,9 +1056,17 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
 }
 
 async function handleSetup(args: string[]): Promise<void> {
-  parseRestoreUrl(args);
+  const restoreUrl = parseRestoreUrl(args);
   const skill = installProxySkill();
   const binPath = writePathBin();
+  if (!restoreUrl && !(await attachAlreadyAimed(readProxyJson()))) {
+    failMissingSetupUrl({
+      skillPath: skill.skillPaths[0] ?? null,
+      skillPaths: skill.skillPaths,
+      ...(binPath ? { binPath } : {}),
+      ...(skill.error ? { skillError: skill.error } : {}),
+    });
+  }
   const priorSessionId = (readProxyJson()?.sessionId ?? '').trim() || null;
   // 1. Reuse the one saved connection (never POST a second).
   const result = await runAttach(args);
