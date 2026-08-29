@@ -31,7 +31,7 @@ Read the JSON. **`next` is the next action.**
 One restart is expected. `setup` tries to quit this Chrome and relaunch it with proxy flags. If you launch Chrome without quitting first, the flags are ignored.
 
 - `ready: true` → a real CONNECT landed. Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed is a no-op.
-- `needsChromeRestart: true` → run `chromeCommand` **exactly** (it quits first, then launches). Then run `aluvia setup` again so setup can wait for the CONNECT.
+- `needsChromeRestart: true` → run `chromeCommand` **exactly** (it quits first, then launches). Then run `aluvia setup` again.
 
 If still not aimed after that, run `aluvia setup` again. Follow `next`.
 

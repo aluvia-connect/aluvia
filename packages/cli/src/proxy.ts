@@ -18,8 +18,14 @@ import {
 } from './config.js';
 import { output } from './cli.js';
 import { getCliLaunch, writePathBin } from './cli-path.js';
-import { chromeRestartCommand, tryRestartChrome } from './chrome-launch.js';
-import { attachWaitMs, waitForExternalConnect, writeChromeProxyPolicy } from './proxy-attach.js';
+import { chromeRestartCommand, skipChromeRestart, tryRestartChrome } from './chrome-launch.js';
+import { isCapturing } from './output-capture.js';
+import {
+  attachWaitMs,
+  attachWaitOverrideMs,
+  waitForExternalConnect,
+  writeChromeProxyPolicy,
+} from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
 import { installProxySkill } from './proxy-skill.js';
 import {
@@ -842,6 +848,12 @@ async function outputMaybeStamp(data: Record<string, unknown>, exitCode = 0): Pr
   return output(data, exitCode);
 }
 
+/** Progress that is not the final JSON. Agents parse stdout; keep this off stdout. */
+function attachProgress(message: string): void {
+  if (isCapturing()) return;
+  process.stderr.write(`aluvia: ${message}\n`);
+}
+
 async function runAttach(args: string[]): Promise<AttachOutcome> {
   const existing = readProxyJson();
   if (existing) {
@@ -900,22 +912,34 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
     };
   }
 
-  const timeoutMs = attachWaitMs();
-  const waitForPriorLaunch =
-    !probe.failed && state.attach.status === 'needs_ui' && state.attach.expectConnectAfter != null;
+  const expectConnectAfter = Date.now();
+  await persistAttach({
+    status: 'needs_ui',
+    method: null,
+    expectConnectAfter,
+    reloadAskedAt: null,
+  });
 
-  let expectConnectAfter = state.attach.expectConnectAfter ?? Date.now();
-  if (!waitForPriorLaunch) {
-    expectConnectAfter = Date.now();
-    await persistAttach({
+  if (!skipChromeRestart()) {
+    attachProgress(`restarting Chrome with proxy flags (quit, then launch on 127.0.0.1:${dataPort})`);
+  }
+  const { launched } = await tryRestartChrome(dataPort, restoreUrl);
+  // Restart skipped/failed: a CONNECT cannot appear unless a test set a short explicit wait.
+  const timeoutMs = launched ? attachWaitMs() : attachWaitOverrideMs();
+  if (timeoutMs == null) {
+    return {
       status: 'needs_ui',
       method: null,
-      expectConnectAfter,
-      reloadAskedAt: null,
-    });
-    await tryRestartChrome(dataPort, restoreUrl);
+      aim,
+      proxyUrl: state.proxyUrl,
+      policyPath: policy.path,
+      chromeCommand,
+      restoreUrl,
+      ...(persistLimit ? { persistLimit } : {}),
+    };
   }
 
+  attachProgress(`waiting up to ${timeoutMs}ms for Chrome to CONNECT to http://127.0.0.1:${dataPort}`);
   const seen = await waitForExternalConnect({ timeoutMs, sinceMs: expectConnectAfter });
   const verifiedNow = seen && readProxyJson()?.attach.status === 'verified';
 
@@ -969,7 +993,7 @@ function setupNext(ready: boolean): string {
   if (ready) {
     return 'Chrome is aimed. Reload the tab. Use `aluvia proxy-off` to go direct and `aluvia proxy-on` to use Aluvia again. If still blocked, run `aluvia status`. If aimed is false, run `aluvia setup` again.';
   }
-  return 'Run chromeCommand (it quits Chrome first, then launches with proxy flags). If you launch without quitting, flags are ignored. Then run `aluvia setup` again so setup can wait for the CONNECT.';
+  return 'Run chromeCommand (it quits Chrome first, then launches with proxy flags). If you launch without quitting, flags are ignored. Then run `aluvia setup` again.';
 }
 
 async function failIfPaymentRequired(res: { status: number; json: Record<string, unknown> }): Promise<void> {
@@ -1030,8 +1054,10 @@ async function handleSetup(args: string[]): Promise<void> {
   // 3. No session_id → mint once, wait for a live probe.
   // 4. Saved session_id → retry the same session on 503/590; rotate only if retries stay dead.
   // 5. rotate-ip remains the explicit new-exit command. Do not rotate to heal first setup.
+  // Skip the session probe until Chrome is aimed. ready requires aimed, and a long
+  // probe would sit silent after setup already knows the next action is chromeCommand.
   const probe =
-    state && healthy
+    aimed && state && healthy
       ? await ensureSetupSession({
           dataPort: state.dataPort,
           sessionId,
@@ -1042,7 +1068,7 @@ async function handleSetup(args: string[]): Promise<void> {
           ok: false,
           status: null,
           ip: null,
-          upstreamUnavailable: readProxyJson()?.code === UPSTREAM_UNAVAILABLE_CODE,
+          upstreamUnavailable: false,
         };
   if (state && healthy) {
     try {
@@ -1054,7 +1080,8 @@ async function handleSetup(args: string[]): Promise<void> {
   }
   const ready = aimed && healthy && probe.ok;
   const skillPath = skill.skillPaths[0] ?? null;
-  const unavailable = isDeadSessionProbe(probe);
+  // A skipped probe (Chrome not aimed) is not a dead session — next is chromeCommand.
+  const unavailable = aimed && isDeadSessionProbe(probe);
   return outputMaybeStamp({
     next: unavailable ? UPSTREAM_UNAVAILABLE_NEXT : setupNext(ready),
     skillPath,
