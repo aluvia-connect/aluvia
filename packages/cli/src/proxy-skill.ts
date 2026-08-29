@@ -46,6 +46,8 @@ export function skillInstallDirs(): string[] {
   ]) {
     if (fs.existsSync(path.dirname(extra))) dirs.push(extra);
   }
+  const grokBotWorkflows = path.join(home, 'agent-data', 'workflows');
+  if (fs.existsSync(grokBotWorkflows)) dirs.push(grokBotWorkflows);
   return [...new Set(dirs)];
 }
 
