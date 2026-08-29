@@ -120,11 +120,16 @@ export function writeChromeProxyPolicy(dataPort: number): PolicyWriteResult {
 
 export const DEFAULT_ATTACH_WAIT_MS = 30_000;
 
-export function attachWaitMs(): number {
+/** Explicit `ALUVIA_ATTACH_WAIT_MS`, or null to use `DEFAULT_ATTACH_WAIT_MS`. */
+export function attachWaitOverrideMs(): number | null {
   const raw = (process.env.ALUVIA_ATTACH_WAIT_MS ?? '').trim();
   const n = Number(raw);
   if (Number.isInteger(n) && n >= 1) return n;
-  return DEFAULT_ATTACH_WAIT_MS;
+  return null;
+}
+
+export function attachWaitMs(): number {
+  return attachWaitOverrideMs() ?? DEFAULT_ATTACH_WAIT_MS;
 }
 
 /**

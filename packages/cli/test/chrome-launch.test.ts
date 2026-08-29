@@ -10,7 +10,7 @@ import {
   skipChromeRestart,
   tryRestartChrome,
 } from '../src/chrome-launch.js';
-import { attachWaitMs, DEFAULT_ATTACH_WAIT_MS } from '../src/proxy-attach.js';
+import { attachWaitMs, attachWaitOverrideMs, DEFAULT_ATTACH_WAIT_MS } from '../src/proxy-attach.js';
 
 describe('chrome launch command', () => {
   test('quits Chrome first, then launches with proxy flags and the page URL', { skip: isWindows() }, () => {
@@ -100,8 +100,12 @@ describe('chrome launch command', () => {
     const prev = process.env.ALUVIA_ATTACH_WAIT_MS;
     delete process.env.ALUVIA_ATTACH_WAIT_MS;
     try {
+      assert.strictEqual(attachWaitOverrideMs(), null);
       assert.strictEqual(attachWaitMs(), DEFAULT_ATTACH_WAIT_MS);
       assert.strictEqual(DEFAULT_ATTACH_WAIT_MS, 30_000);
+      process.env.ALUVIA_ATTACH_WAIT_MS = '50';
+      assert.strictEqual(attachWaitOverrideMs(), 50);
+      assert.strictEqual(attachWaitMs(), 50);
     } finally {
       if (prev === undefined) delete process.env.ALUVIA_ATTACH_WAIT_MS;
       else process.env.ALUVIA_ATTACH_WAIT_MS = prev;

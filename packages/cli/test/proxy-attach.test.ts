@@ -6,6 +6,7 @@ import path from 'node:path';
 import { getStoredConnectionId } from '../src/config.js';
 import { captureOutput } from '../src/output-capture.js';
 import { handleProxy } from '../src/proxy.js';
+import { attachWaitMs, DEFAULT_ATTACH_WAIT_MS } from '../src/proxy-attach.js';
 import { readProxyJson, writeProxyJson } from '../src/proxy-state.js';
 import { createMockAluviaApi } from './helpers/mock-aluvia-api.js';
 import { createMockGateway, MOCK_EGRESS_IP } from './helpers/mock-gateway.js';
@@ -184,6 +185,65 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
       assert.strictEqual(result.data.status, 'needs_ui');
       assert.ok(typeof result.data.policyPath === 'string');
+    });
+
+    test('setup fail-fast when Chrome cannot aim does not burn the default attach wait', async () => {
+      await startDaemon();
+      delete process.env.ALUVIA_ATTACH_WAIT_MS;
+      assert.strictEqual(attachWaitMs(), DEFAULT_ATTACH_WAIT_MS);
+      assert.ok(DEFAULT_ATTACH_WAIT_MS >= 15_000);
+      const started = Date.now();
+      const result = await captureOutput(() => handleProxy(setupArgs(dataPort, controlPort)));
+      const elapsed = Date.now() - started;
+      assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
+      assert.strictEqual(result.data.status, 'needs_ui');
+      assert.strictEqual(result.data.aimed, false);
+      assert.strictEqual(result.data.ready, false);
+      assert.strictEqual(result.data.healthy, true);
+      assert.strictEqual(result.data.needsChromeRestart, true);
+      assert.ok(typeof result.data.chromeCommand === 'string');
+      if (process.platform === 'win32') {
+        assert.ok(String(result.data.chromeCommand).startsWith('taskkill /F /IM chrome.exe'));
+      } else {
+        assert.ok(String(result.data.chromeCommand).includes('pkill -x google-chrome'));
+      }
+      assert.ok(String(result.data.chromeCommand).includes(`--proxy-server=http://127.0.0.1:${dataPort}`));
+      assert.ok(String(result.data.chromeCommand).includes('--disable-quic'));
+      assert.match(String(result.data.next), /chromeCommand/);
+      assert.ok(
+        elapsed < 5_000,
+        `setup took ${elapsed}ms; must not wait DEFAULT_ATTACH_WAIT_MS=${DEFAULT_ATTACH_WAIT_MS}`,
+      );
+      assert.ok(
+        elapsed < DEFAULT_ATTACH_WAIT_MS / 4,
+        `setup took ${elapsed}ms; production default wait is ${DEFAULT_ATTACH_WAIT_MS}ms`,
+      );
+    });
+
+    test('already needs_ui setup does not wait the production attach timeout', async () => {
+      await startDaemon();
+      process.env.ALUVIA_ATTACH_WAIT_MS = '50';
+      const first = await captureOutput(() => handleProxy(setupArgs(dataPort, controlPort)));
+      assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
+      assert.strictEqual(first.data.status, 'needs_ui');
+      assert.strictEqual(readProxyJson()?.attach.status, 'needs_ui');
+      assert.ok(readProxyJson()?.attach.expectConnectAfter != null);
+
+      delete process.env.ALUVIA_ATTACH_WAIT_MS;
+      assert.strictEqual(attachWaitMs(), DEFAULT_ATTACH_WAIT_MS);
+      const started = Date.now();
+      const second = await captureOutput(() => handleProxy(setupArgs(dataPort, controlPort)));
+      const elapsed = Date.now() - started;
+      assert.strictEqual(second.isError, false, String(second.data.error ?? ''));
+      assert.strictEqual(second.data.status, 'needs_ui');
+      assert.strictEqual(second.data.aimed, false);
+      assert.strictEqual(second.data.needsChromeRestart, true);
+      assert.ok(typeof second.data.chromeCommand === 'string');
+      assert.ok(String(second.data.chromeCommand).includes('--proxy-server='));
+      assert.ok(
+        elapsed < 5_000,
+        `second setup took ${elapsed}ms; must not wait DEFAULT_ATTACH_WAIT_MS=${DEFAULT_ATTACH_WAIT_MS}`,
+      );
     });
 
     test('setup starts proxyd when down', async () => {
