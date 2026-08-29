@@ -1,11 +1,11 @@
 # Aluvia
 
-**Stop getting blocked.** Aluvia sends a computer-use agent's existing Chrome through residential and mobile carrier IPs — the same IPs real people use on their phones. Websites trust them, so the agent stops hitting 403s, CAPTCHAs, and “unusual traffic.” Any country by default; pin one with `--geo US` only when the site requires it.
+**Stop getting blocked.** Aluvia sends a computer-use agent's existing Chrome through residential and mobile IPs — the same IPs real people use. Websites trust them, so the agent stops hitting 403s, CAPTCHAs, and “unusual traffic.” Any country by default; pin one with `--geo US` only when the site requires it.
 
 The product is a local CLI. The human does not SSH into the VM or edit environment variables. They talk to the agent. The agent runs `aluvia`.
 
 ```
-Chrome  ──aim──▶  127.0.0.1:18787  ──egress──▶  Aluvia mobile IP
+Chrome  ──aim──▶  127.0.0.1:18787  ──egress──▶  Aluvia residential/mobile IP
    ▲                     │                         or
    │                     │                      this VM's
    │                     ▼                      datacenter IP
@@ -26,6 +26,8 @@ Node.js 18+. If `aluvia` is not on PATH, prefix every command with `npx aluvia-c
 ```bash
 npx aluvia-cli setup
 ```
+
+Setup writes `~/.local/bin/aluvia` so later commands can be `aluvia` without npx.
 
 `--url <page>` is optional. If you have the blocked page, pass it so Chrome opens that tab after the restart.
 
@@ -64,7 +66,7 @@ Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab
 
 | Goal | Command |
 | --- | --- |
-| Use Aluvia (all tabs through a mobile IP) | `aluvia proxy-on` then reload. Any country. `--geo US` only if the site requires it. |
+| Use Aluvia (all tabs through a residential/mobile IP) | `aluvia proxy-on` then reload. Any country. `--geo US` only if the site requires it. |
 | Back to the VM datacenter IP | `aluvia proxy-off` then reload. Do not quit Chrome. |
 | New exit IP | `aluvia rotate-ip` then reload. Any country. `--geo US` only if required. |
 | Check | `aluvia status` — follow `next`. `what` explains every field. |
@@ -105,6 +107,8 @@ The human cannot edit this VM. Ask them in chat. Then **you** run the command. N
 | An Aluvia API key | `aluvia auth <that key>` |
 | Their own proxy URL | `aluvia proxy-provider <url>` |
 | They want Aluvia again after a BYO proxy | `aluvia proxy-provider aluvia` |
+
+Bring-your-own proxy is free.
 
 ### When the trial is used up
 
@@ -211,7 +215,7 @@ Never print API keys. Persist credentials with `aluvia auth` and `aluvia proxy-p
 
 Use Aluvia when a GUI workflow hits Cloudflare, Access Denied, CAPTCHA, unusual traffic, or a hard 403 on a page that should load — not a normal login wall.
 
-`aluvia setup` copies that file into the Aluvia home `skills/` directory and `~/.agents/skills`. If `/workspace` exists, also `/workspace/.agents/skills`. If `~/.grok`, `~/.claude`, `~/.cursor`, `~/.codex`, `~/.hermes`, `~/.openclaw`, or `~/.openclaw/workspace` already exists, it copies into that app’s `skills/` directory. It does not create folders for agents that are not installed. `skillPath` is the first successful copy. `skillPaths` is the full list.
+`aluvia setup` copies that file into the Aluvia home `skills/` directory and `~/.agents/skills`. If `/workspace` exists, also `/workspace/.agents/skills`. If `~/.grok`, `~/.claude`, `~/.cursor`, `~/.codex`, `~/.hermes`, `~/.openclaw`, or `~/.openclaw/workspace` already exists, it copies into that app’s `skills/` directory. If `~/agent-data/workflows` already exists (Grok Bot catalog), it copies there too. It does not create folders for agents that are not installed. `skillPath` is the first successful copy. `skillPaths` is the full list.
 
 ---
 
