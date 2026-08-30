@@ -85,6 +85,25 @@ describe('proxy skill install', () => {
     assert.strictEqual(body, fs.readFileSync(repoCopy, 'utf8'));
   });
 
+  test('shipped skill has exactly one YAML frontmatter document', () => {
+    const src = bundledSkillPath();
+    assert.ok(src);
+    const body = fs.readFileSync(src, 'utf8');
+    const lines = body.split('\n');
+    assert.strictEqual(lines.filter((line) => line === 'name: aluvia').length, 1);
+
+    assert.strictEqual(lines[0], '---');
+    const closing = lines.indexOf('---', 1);
+    assert.ok(closing > 1, 'frontmatter must close with ---');
+    const frontmatter = lines.slice(1, closing).join('\n');
+    const remainder = lines.slice(closing + 1).join('\n');
+
+    assert.ok(!remainder.includes('name: aluvia'));
+    assert.ok(frontmatter.includes('proxy-on --geo US'));
+    assert.ok(frontmatter.includes('aluvia geos'));
+    assert.ok(frontmatter.includes('Run aluvia and follow next'));
+  });
+
   test('installProxySkill writes SKILL.md to ALUVIA_SKILL_DIRS', () => {
     const destRoot = path.join(home, 'agents-skills');
     process.env.ALUVIA_SKILL_DIRS = destRoot;
