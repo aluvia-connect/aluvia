@@ -1,6 +1,10 @@
 # Aluvia
 
-**Stop getting blocked.** Aluvia sends a computer-use agent's existing Chrome through residential and mobile carrier IPs — the same IPs real people use on their phones. Websites trust them, so the agent stops hitting 403s, CAPTCHAs, and “unusual traffic.” Any country by default; pin one with `--geo US` only when the site requires it.
+A cloud agent's browser uses the datacenter's country. Sites treat that country as the agent's location, then show that country's prices, catalog, and language, or say the content is not available there. Aluvia lets the agent pick a country. Traffic leaves through a residential or mobile IP in that country, so the site serves that country's page.
+
+The agent's country is the datacenter's country. That is often the wrong country for the site. Set a country (`aluvia proxy-on --geo US`; run `aluvia geos` for the list). Aluvia sends the browser through a residential or mobile IP there. The site sees that country's IP and returns the matching page.
+
+A residential IP in the right country sometimes also clears a 403, CAPTCHA, or Cloudflare block.
 
 The product is a local CLI. The human does not SSH into the VM or edit environment variables. They talk to the agent. The agent runs `aluvia`.
 
@@ -64,9 +68,9 @@ Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab
 
 | Goal | Command |
 | --- | --- |
-| Use Aluvia (all tabs through a mobile IP) | `aluvia proxy-on` then reload. Any country. `--geo US` only if the site requires it. |
+| Pick a country | `aluvia geos`, then `aluvia proxy-on --geo US`, then reload. Country only. Omit `--geo` to use every geo. |
 | Back to the VM datacenter IP | `aluvia proxy-off` then reload. Do not quit Chrome. |
-| New exit IP | `aluvia rotate-ip` then reload. Any country. `--geo US` only if required. |
+| New exit IP | `aluvia rotate-ip` then reload. `--geo US` to pin a country. |
 | Check | `aluvia status` — follow `next`. `what` explains every field. |
 | Stop the daemon | `aluvia stop` — Chrome aimed at 18787 will break. Prefer `proxy-off`. |
 
@@ -209,7 +213,7 @@ Never print API keys. Persist credentials with `aluvia auth` and `aluvia proxy-p
 
 [`skills/aluvia/SKILL.md`](./skills/aluvia/SKILL.md) is the instruction file computer-use agents follow.
 
-Use Aluvia when a GUI workflow hits Cloudflare, Access Denied, CAPTCHA, unusual traffic, or a hard 403 on a page that should load — not a normal login wall.
+Use Aluvia when a cloud agent is in the wrong country for a site — not available in your region, wrong catalog or prices, or `aluvia proxy-on --geo US` — and when a GUI workflow hits Cloudflare, Access Denied, CAPTCHA, unusual traffic, or a hard 403. Not a normal login wall.
 
 `aluvia setup` copies that file into the Aluvia home `skills/` directory and `~/.agents/skills`. If `/workspace` exists, also `/workspace/.agents/skills`. If `~/.grok`, `~/.claude`, `~/.cursor`, `~/.codex`, `~/.hermes`, `~/.openclaw`, or `~/.openclaw/workspace` already exists, it copies into that app’s `skills/` directory. It does not create folders for agents that are not installed. `skillPath` is the first successful copy. `skillPaths` is the full list.
 
