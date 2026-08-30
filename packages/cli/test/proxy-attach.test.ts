@@ -517,14 +517,83 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(status.data.aimed, true);
     });
 
-    test('setup without --url starts and does not put a page URL in chromeCommand', async () => {
+    test('setup without --url, not aimed, fails fast and asks for --url', async () => {
+      await startDaemon();
+      delete process.env.ALUVIA_ATTACH_WAIT_MS;
+      assert.strictEqual(attachWaitMs(), DEFAULT_ATTACH_WAIT_MS);
+      const expectBefore = readProxyJson()?.attach.expectConnectAfter ?? null;
+      const started = Date.now();
+      const result = await captureOutput(() => handleProxy(setupArgsNoUrl(dataPort, controlPort)));
+      const elapsed = Date.now() - started;
+      assert.strictEqual(result.isError, true);
+      assert.match(String(result.data.error), /--url/);
+      assert.match(String(result.data.next), /--url/);
+      assert.match(String(result.data.next), /https-page/);
+      assert.strictEqual(result.data.aimed, false);
+      assert.strictEqual(result.data.ready, false);
+      assert.strictEqual(result.data.needsChromeRestart, true);
+      assert.strictEqual(result.data.restoreUrl, null);
+      assert.strictEqual(result.data.chromeCommand, undefined);
+      assert.strictEqual(readProxyJson()?.attach.expectConnectAfter ?? null, expectBefore);
+      assert.ok(
+        elapsed < 5_000,
+        `setup without --url took ${elapsed}ms; must not wait DEFAULT_ATTACH_WAIT_MS=${DEFAULT_ATTACH_WAIT_MS}`,
+      );
+      assert.ok(
+        elapsed < DEFAULT_ATTACH_WAIT_MS / 4,
+        `setup without --url took ${elapsed}ms; production default wait is ${DEFAULT_ATTACH_WAIT_MS}ms`,
+      );
+    });
+
+    test('lastConnect after expectConnectAfter is aimed; setup does not reset or restart', async () => {
       await startDaemon();
       process.env.ALUVIA_ATTACH_WAIT_MS = '50';
-      const result = await captureOutput(() => handleProxy(setupArgsNoUrl(dataPort, controlPort)));
-      assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
-      assert.strictEqual(result.data.restoreUrl, null);
-      assert.ok(String(result.data.chromeCommand).includes('--restore-last-session'));
-      assert.ok(!String(result.data.chromeCommand).includes('https://'));
+      const first = await captureOutput(() => handleProxy(setupArgs(dataPort, controlPort)));
+      assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
+      assert.strictEqual(first.data.status, 'needs_ui');
+      assert.strictEqual(first.data.aimed, false);
+      const expectAfter = readProxyJson()?.attach.expectConnectAfter;
+      assert.ok(typeof expectAfter === 'number');
+
+      const set = await fetch(`http://127.0.0.1:${controlPort}/last-connect`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ hostname: 'accounts.google.com', at: expectAfter + 1 }),
+      });
+      assert.strictEqual(set.status, 200);
+      assert.strictEqual(readProxyJson()?.attach.status, 'needs_ui');
+
+      const status = await captureOutput(() => handleProxy(['status']));
+      assert.strictEqual(status.isError, false, String(status.data.error ?? ''));
+      assert.strictEqual(status.data.aimed, true);
+      assert.strictEqual(status.data.needsChromeRestart, false);
+      assert.strictEqual(status.data.chromeCommand, undefined);
+      assert.ok(!String(status.data.next).includes('chromeCommand'));
+      assert.strictEqual(readProxyJson()?.attach.status, 'verified');
+      assert.strictEqual(readProxyJson()?.attach.expectConnectAfter, expectAfter);
+
+      const reset = await fetch(`http://127.0.0.1:${controlPort}/attach-state`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          status: 'needs_ui',
+          method: null,
+          expectConnectAfter: expectAfter,
+          reloadAskedAt: null,
+        }),
+      });
+      assert.strictEqual(reset.status, 200);
+      assert.strictEqual(readProxyJson()?.attach.status, 'needs_ui');
+
+      const second = await captureOutput(() => handleProxy(setupArgsNoUrl(dataPort, controlPort)));
+      assert.strictEqual(second.isError, false, String(second.data.error ?? ''));
+      assert.strictEqual(second.data.status, 'verified');
+      assert.strictEqual(second.data.aimed, true);
+      assert.strictEqual(second.data.needsChromeRestart, false);
+      assert.strictEqual(second.data.chromeCommand, undefined);
+      assert.ok(!String(second.data.next).includes('chromeCommand'));
+      assert.strictEqual(readProxyJson()?.attach.status, 'verified');
+      assert.strictEqual(readProxyJson()?.attach.expectConnectAfter, expectAfter);
     });
 
     test('setup with empty or invalid --url is a usage error', async () => {

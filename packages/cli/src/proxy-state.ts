@@ -71,12 +71,19 @@ function hasConnect(lastConnect: LastConnectSnapshot | undefined): boolean {
   return Boolean(lastConnect?.hostname && lastConnect.at != null);
 }
 
-/** Verified attach plus at least one non-loopback CONNECT. Idle tabs stay aimed. */
+/**
+ * Chrome is aimed when attach is verified and a non-loopback CONNECT exists
+ * (idle tabs stay aimed), or when lastConnect landed at or after expectConnectAfter
+ * even if attach is still needs_ui.
+ */
 export function isLiveAim(
   attach: ProxyAttachState | undefined,
   lastConnect: LastConnectSnapshot | undefined,
 ): boolean {
-  return attach?.status === 'verified' && hasConnect(lastConnect);
+  if (!hasConnect(lastConnect)) return false;
+  if (attach?.status === 'verified') return true;
+  const expectAfter = attach?.expectConnectAfter ?? null;
+  return expectAfter != null && lastConnect!.at! >= expectAfter;
 }
 
 export function resolveAimProbe(
@@ -84,27 +91,47 @@ export function resolveAimProbe(
   lastConnect: LastConnectSnapshot | undefined,
 ): { aimed: boolean; attach: ProxyAttachState; failed: boolean } {
   const normalized = normalizeAttach(attach);
-  if (normalized.status !== 'verified' || !hasConnect(lastConnect)) {
-    return { aimed: false, attach: normalized, failed: false };
+  const connected = hasConnect(lastConnect);
+
+  if (normalized.status === 'verified' && connected) {
+    const stamp = normalized.reloadAskedAt;
+    if (stamp == null) {
+      return { aimed: true, attach: normalized, failed: false };
+    }
+    const at = lastConnect!.at!;
+    if (at > stamp) {
+      return { aimed: true, attach: { ...normalized, reloadAskedAt: null }, failed: false };
+    }
+    return {
+      aimed: false,
+      attach: {
+        status: 'needs_ui',
+        method: normalized.method,
+        expectConnectAfter: stamp,
+        reloadAskedAt: null,
+      },
+      failed: true,
+    };
   }
-  const stamp = normalized.reloadAskedAt;
-  if (stamp == null) {
-    return { aimed: true, attach: normalized, failed: false };
+
+  if (
+    connected &&
+    normalized.expectConnectAfter != null &&
+    lastConnect!.at! >= normalized.expectConnectAfter
+  ) {
+    return {
+      aimed: true,
+      attach: {
+        status: 'verified',
+        method: normalized.method,
+        expectConnectAfter: normalized.expectConnectAfter,
+        reloadAskedAt: null,
+      },
+      failed: false,
+    };
   }
-  const at = lastConnect!.at!;
-  if (at > stamp) {
-    return { aimed: true, attach: { ...normalized, reloadAskedAt: null }, failed: false };
-  }
-  return {
-    aimed: false,
-    attach: {
-      status: 'needs_ui',
-      method: normalized.method,
-      expectConnectAfter: stamp,
-      reloadAskedAt: null,
-    },
-    failed: true,
-  };
+
+  return { aimed: false, attach: normalized, failed: false };
 }
 
 export function nextAsksReload(next: string): boolean {

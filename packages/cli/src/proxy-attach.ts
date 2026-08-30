@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isLoopbackHostname } from './net/loopback.js';
 import { controlRequest } from './proxy-control-client.js';
-import { readProxyJson } from './proxy-state.js';
 import { isWindows } from './chrome-launch.js';
 
 export type PolicyWriteResult = {
@@ -135,8 +134,8 @@ export function attachWaitMs(): number {
 /**
  * Wait for a GUI CONNECT that happens at or after `sinceMs`.
  * Pre-existing CONNECTs (including `curl -x` before attach started) do not count.
- * A 590/503 CONNECT is not verified aim — only tunnelConnectResponded verifies.
- * One 590 does not abort the wait; keep looking for a 200.
+ * lastConnect after sinceMs proves Chrome reached the local proxy (aimed).
+ * 590/503 is not ready — that is the session probe, not this wait.
  */
 export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs: number }): Promise<boolean> {
   const deadline = Date.now() + opts.timeoutMs;
@@ -151,10 +150,7 @@ export async function waitForExternalConnect(opts: { timeoutMs: number; sinceMs:
         !isLoopbackHostname(hostname) &&
         at != null &&
         at >= opts.sinceMs;
-      if (recent) {
-        const state = readProxyJson();
-        if (state?.attach.status === 'verified') return true;
-      }
+      if (recent) return true;
     } catch {
       // keep polling until timeout
     }

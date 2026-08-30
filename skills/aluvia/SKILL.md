@@ -29,15 +29,15 @@ Cloudflare, CAPTCHA, Access Denied, unusual traffic, or a hard 403 on a page tha
 1. Copy the address-bar URL.
 2. `aluvia status` if you already ran setup on this machine. Follow `next`. `what` explains every field.
 3. `{"code":"payment_required"}` always includes `claim_url` and `next` → show the human `claim_url`. Then `aluvia auth login` to wait. **Paid** below.
-4. First time, or `aimed` is false → **First install** (`aluvia setup`). Pass `--url <page>` only if you have the address-bar URL.
+4. First time, or `aimed` is false → **First install** (`aluvia setup --url <https-page>`). Pass the address-bar URL. `--url` is required unless Chrome is already aimed.
 
 ## First install (once per machine)
 
 ```bash
-npx aluvia-cli setup
+npx aluvia-cli setup --url <https-page>
 ```
 
-`--url <page>` is optional. If you have the blocked page, pass it so Chrome opens that tab after the restart.
+`--url <page>` is required when Chrome is not already aimed, so the restart opens a real HTTPS page that CONNECTs. Do not omit it. Do not invent a URL.
 
 Read the JSON. **`next` is the next action.**
 

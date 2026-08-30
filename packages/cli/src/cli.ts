@@ -32,7 +32,7 @@ export function buildHelpJson(): {
           {
             flag: '--url <url>',
             description:
-              'Optional. Open this page after the Chrome restart. Omit to restore the last session only.',
+              'Required when Chrome is not already aimed. Open this page after the Chrome restart so a CONNECT can land.',
           },
         ],
       },

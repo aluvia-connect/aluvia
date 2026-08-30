@@ -202,12 +202,12 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     writeProxyJson(data);
   };
 
-  proxy.setRequestObserver((hostname, viaUpstream) => {
+  proxy.setRequestObserver((hostname) => {
     if (isLoopbackHostname(hostname)) return;
     lastConnect = { hostname, at: Date.now() };
-    // Direct (no Aluvia hop) can mark aim. An upstream CONNECT is verified
-    // only after tunnelConnectResponded — a 590 must not count as verified.
-    if (!viaUpstream) maybeVerifyAttach();
+    // A CONNECT to the local proxy proves aim. 590/503 is not ready
+    // (session probe). Do not wait for tunnelConnectResponded.
+    maybeVerifyAttach();
     persist(true);
   });
 
