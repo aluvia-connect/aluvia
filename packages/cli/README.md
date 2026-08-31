@@ -1,6 +1,6 @@
 # aluvia-cli
 
-The Aluvia CLI. A local proxy that sends a computer-use agent's existing Chrome through residential and mobile carrier IPs.
+The Aluvia CLI. A local proxy that sends a computer-use agent's existing Chrome through residential and mobile IPs.
 
 Chrome aims at `http://127.0.0.1:18787`. The daemon (control `18788`) either sends that traffic through Aluvia or out of the VM directly. All commands print JSON. Follow `next`. Never print API keys.
 
@@ -14,7 +14,7 @@ npx aluvia-cli setup
 
 Or `npm i -g aluvia-cli` and run `aluvia`. Node.js 18+.
 
-A first setup starts a free trial. No API key. The human does not SSH or edit env vars — they paste a key or proxy URL in chat, and the agent runs the command.
+First 10 MB free, no account, no API key. Paid $2/GB. Docs: https://aluvia.io/docs. The human does not SSH or edit env vars — they paste a key or proxy URL in chat, and the agent runs the command.
 
 ## Commands
 
