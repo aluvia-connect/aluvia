@@ -16,6 +16,21 @@ Or `npm i -g aluvia-cli` and run `aluvia`. Node.js 18+.
 
 First 10 MB free, no account, no API key. Paid $2/GB. Docs: https://aluvia.io/docs. The human does not SSH or edit env vars — they paste a key or proxy URL in chat, and the agent runs the command.
 
+## Wrong country / geo
+
+The agent's country is the datacenter's country. Pick a country (`aluvia geos`, then `aluvia proxy-on --geo US`). Traffic leaves through a residential or mobile IP there. Country only, not city. Not a human VPN.
+
+Live pages: [https://aluvia.io/geo](https://aluvia.io/geo)
+
+- [https://aluvia.io/geo/grok-bot](https://aluvia.io/geo/grok-bot)
+- [https://aluvia.io/geo/cursor](https://aluvia.io/geo/cursor)
+- [https://aluvia.io/geo/codex](https://aluvia.io/geo/codex)
+- [https://aluvia.io/geo/playwright](https://aluvia.io/geo/playwright)
+- [https://aluvia.io/geo/claude](https://aluvia.io/geo/claude)
+- [https://aluvia.io/geo/openclaw](https://aluvia.io/geo/openclaw)
+- [https://aluvia.io/geo/hermes](https://aluvia.io/geo/hermes)
+- [https://aluvia.io/geo/without-a-vpn](https://aluvia.io/geo/without-a-vpn)
+
 ## Commands
 
 ```

@@ -25,6 +25,23 @@ Local proxy: `http://127.0.0.1:18787`. Control: `http://127.0.0.1:18788`. Every 
 
 ---
 
+## Wrong country / geo
+
+The agent's country is the datacenter's country. Pick a country (`aluvia geos`, then `aluvia proxy-on --geo US`). Traffic leaves through a residential or mobile IP there. Country only, not city. Not a human VPN.
+
+Live pages: [https://aluvia.io/geo](https://aluvia.io/geo)
+
+- [https://aluvia.io/geo/grok-bot](https://aluvia.io/geo/grok-bot)
+- [https://aluvia.io/geo/cursor](https://aluvia.io/geo/cursor)
+- [https://aluvia.io/geo/codex](https://aluvia.io/geo/codex)
+- [https://aluvia.io/geo/playwright](https://aluvia.io/geo/playwright)
+- [https://aluvia.io/geo/claude](https://aluvia.io/geo/claude)
+- [https://aluvia.io/geo/openclaw](https://aluvia.io/geo/openclaw)
+- [https://aluvia.io/geo/hermes](https://aluvia.io/geo/hermes)
+- [https://aluvia.io/geo/without-a-vpn](https://aluvia.io/geo/without-a-vpn)
+
+---
+
 ## Install
 
 Node.js 18+. If `aluvia` is not on PATH, prefix every command with `npx aluvia-cli`.
