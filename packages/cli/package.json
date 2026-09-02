@@ -1,6 +1,6 @@
 {
   "name": "aluvia-cli",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "Local CLI that sends a cloud agent's Chrome through global residential and mobile IPs. npx aluvia-cli setup",
   "license": "MIT",
   "author": "Aluvia",
@@ -41,7 +41,14 @@
   "keywords": [
     "cli",
     "proxy",
-    "aluvia"
+    "aluvia",
+    "geo",
+    "residential",
+    "grok-bot",
+    "playwright",
+    "cloudflare",
+    "captcha",
+    "datacenter"
   ],
   "devDependencies": {
     "@types/node": "^24.10.2",
