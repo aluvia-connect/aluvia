@@ -238,6 +238,14 @@ Use Aluvia when a cloud agent is in the wrong country for a site — not availab
 
 ---
 
+## Cursor / Grok Bot plugin
+
+This repository is also a skill-only Agent Plugin (`plugin.json` and [`skills/aluvia/SKILL.md`](./skills/aluvia/SKILL.md)) for Cursor and Grok Bot Settings → Plugins. The plugin is not an MCP. Install the product with `npx aluvia-cli setup`, then `aluvia proxy-on --geo US`.
+
+To test locally, symlink this repo to `~/.cursor/plugins/local/aluvia`, reload, and confirm the Aluvia skill in Customize.
+
+---
+
 ## This repository
 
 A private workspace. The released package is **aluvia-cli** (`aluvia` bin) in [`packages/cli`](./packages/cli). Internals live in `packages/cli/src/net`.

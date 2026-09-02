@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "aluvia",
+  "version": "1.0.0",
+  "description": "Pick a country for a cloud agent's Chrome. Traffic leaves through a residential or mobile IP there.",
+  "author": {
+    "name": "Aluvia",
+    "url": "https://aluvia.io"
+  },
+  "homepage": "https://aluvia.io",
+  "repository": "https://github.com/aluvia-connect/aluvia",
+  "license": "MIT",
+  "keywords": [
+    "geo",
+    "residential",
+    "grok-bot",
+    "playwright",
+    "cloudflare",
+    "captcha",
+    "datacenter"
+  ]
+}
