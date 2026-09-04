@@ -27,6 +27,7 @@ import {
   writeChromeProxyPolicy,
 } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
+import { maybeFireAluviaInstallBeacon } from './meta-aluvia-install.js';
 import { installProxySkill } from './proxy-skill.js';
 import {
   DEFAULT_CONTROL_PORT,
@@ -1116,6 +1117,9 @@ async function handleSetup(args: string[]): Promise<void> {
     }
   }
   const ready = aimed && healthy && probe.ok;
+  if (ready) {
+    void maybeFireAluviaInstallBeacon();
+  }
   const skillPath = skill.skillPaths[0] ?? null;
   // A skipped probe (Chrome not aimed) is not a dead session — next is chromeCommand.
   const unavailable = aimed && isDeadSessionProbe(probe);

@@ -62,6 +62,19 @@ aluvia help [--json]               Command list as JSON
 
 They can also paste a key (`aluvia auth <key>`) or their own proxy (`aluvia proxy-provider <url>`).
 
+## Meta install beacon
+
+When `setup` first reaches `ready: true`, the CLI sends one best-effort GET to `https://www.facebook.com/tr` with custom event `aluvia_install`, once per install id. Pixel only — not CAPI. A failed or missing beacon never blocks setup. Click/browser ids are taken from env when present and are never invented.
+
+Optional env (website clipboard join):
+
+| Variable | Role |
+| --- | --- |
+| `ALUVIA_META_PIXEL_ID` | Pixel id (default `2173975809846289`) |
+| `ALUVIA_META_FBC` | `_fbc` click cookie |
+| `ALUVIA_META_FBP` | `_fbp` browser cookie |
+| `ALUVIA_META_FBCLID` | `fbclid` click id. If set and `ALUVIA_META_FBC` is not, `fbc` is built as `fb.1.{timestamp}.{fbclid}` |
+
 ## License
 
 MIT
