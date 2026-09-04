@@ -4,6 +4,7 @@ import { isLoopbackHostname } from './net/loopback.js';
 import { ConfigManager } from './net/config-manager.js';
 import { ProxyServer } from './net/proxy-server.js';
 import { saveConnectionId } from './config.js';
+import { maybeFireFirstProxyRequestFromTraffic } from './meta-first-proxy-request.js';
 import { createControlServer } from './proxy-control-server.js';
 import {
   DEFAULT_CONTROL_PORT,
@@ -202,13 +203,15 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     writeProxyJson(data);
   };
 
-  proxy.setRequestObserver((hostname) => {
+  proxy.setRequestObserver((hostname, viaUpstream, isHttp) => {
     if (isLoopbackHostname(hostname)) return;
     lastConnect = { hostname, at: Date.now() };
     // A CONNECT to the local proxy proves aim. 590/503 is not ready
     // (session probe). Do not wait for tunnelConnectResponded.
     maybeVerifyAttach();
     persist(true);
+    // HTTP through upstream. CONNECT waits for tunnelConnectResponded below.
+    maybeFireFirstProxyRequestFromTraffic({ hostname, viaUpstream, isHttp });
   });
 
   // Success verifies aim. A 503/590 is a flake — do not flip ready=false or
@@ -218,6 +221,13 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     if (isLoopbackHostname(outcome.hostname) || !outcome.ok) return;
     maybeVerifyAttach();
     persist(true);
+    // customTag is only set when the CONNECT was sent through upstream.
+    maybeFireFirstProxyRequestFromTraffic({
+      hostname: outcome.hostname,
+      viaUpstream: true,
+      isHttp: false,
+      connectOk: true,
+    });
   });
 
   writeProxyJson({

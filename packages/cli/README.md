@@ -62,9 +62,13 @@ aluvia help [--json]               Command list as JSON
 
 They can also paste a key (`aluvia auth <key>`) or their own proxy (`aluvia proxy-provider <url>`).
 
-## Meta install beacon
+## Meta Pixel
 
-When `setup` first reaches `ready: true`, the CLI sends one best-effort GET to `https://www.facebook.com/tr` with custom event `aluvia_install`, once per install id. Pixel only — not CAPI. A failed or missing beacon never blocks setup. Click/browser ids are taken from env when present and are never invented.
+When `setup` first reaches `ready: true`, the CLI sends one best-effort GET to `https://www.facebook.com/tr` with custom event `aluvia_install`, once per install id.
+
+The first successful client request the local proxy sends through upstream (HTTPS CONNECT 200 or HTTP) sends custom event `first_proxy_request`, once per install id (`$ALUVIA_HOME/meta-first-proxy-request-fired`). `setup`, `proxy-on`, and `rotate-ip` do not fire this by themselves. Session probes to echo hosts are skipped.
+
+Pixel only — not CAPI. A failed or missing beacon never blocks setup or proxy traffic. Click/browser ids are taken from env when present and are never invented.
 
 Optional env (website clipboard join):
 

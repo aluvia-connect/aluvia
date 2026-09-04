@@ -1,6 +1,6 @@
 {
   "name": "aluvia-cli",
-  "version": "1.4.9",
+  "version": "1.4.10",
   "description": "Local CLI that sends a cloud agent's Chrome through global residential and mobile IPs. npx aluvia-cli setup",
   "license": "MIT",
   "author": "Aluvia",

@@ -28,6 +28,7 @@ import {
 } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
 import { maybeFireAluviaInstallBeacon } from './meta-aluvia-install.js';
+import { DEFAULT_PROBE_URLS, probeTargetUrls } from './session-probe-hosts.js';
 import { installProxySkill } from './proxy-skill.js';
 import {
   DEFAULT_CONTROL_PORT,
@@ -46,6 +47,8 @@ import {
   type ProxyEgress,
   type ProxyJson,
 } from './proxy-state.js';
+
+export { DEFAULT_PROBE_URLS };
 
 const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
 const CONTROL_TIMEOUT = 'proxyd did not respond. Run `aluvia status`.';
@@ -155,12 +158,6 @@ function savedDaemonArgs(existing: ProxyJson, args: string[] = []): string[] {
 }
 
 const DATACENTER_IP = '104.30.175.37';
-/** ipify alone flakes 503 while other echo hosts already succeed on the same session. */
-export const DEFAULT_PROBE_URLS = [
-  'https://api.ipify.org/',
-  'https://ifconfig.me/ip',
-  'https://icanhazip.com/',
-];
 const UPSTREAM_UNAVAILABLE_ERROR = 'Upstream gateway returned 503 (590 UPSTREAM503).';
 const UPSTREAM_UNAVAILABLE_CODE = 'upstream_unavailable';
 const UPSTREAM_UNAVAILABLE_NEXT = 'Run `aluvia rotate-ip` then reload the tab.';
@@ -175,12 +172,6 @@ export type TunnelProbe = {
 function datacenterIp(): string {
   const raw = (process.env.ALUVIA_DATACENTER_IP ?? '').trim();
   return raw || DATACENTER_IP;
-}
-
-function probeTargetUrls(): string[] {
-  const raw = (process.env.ALUVIA_PROBE_URL ?? '').trim();
-  if (raw) return [raw];
-  return DEFAULT_PROBE_URLS;
 }
 
 function probeTargetUrl(): string {
