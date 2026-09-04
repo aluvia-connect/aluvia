@@ -58,4 +58,43 @@ describe('ProxyServer hostname extraction', () => {
       customTag: 'example.com',
     });
   });
+
+  test('request observer receives viaUpstream and isHttp', () => {
+    const config = {
+      rawProxy: {
+        protocol: 'http',
+        host: 'gateway.aluvia.io' as const,
+        port: 8080,
+        username: 'user',
+        password: 'pass',
+      },
+      rules: ['*'],
+      sessionId: null,
+      targetGeo: null,
+      etag: null,
+    };
+
+    const mgr = { getConfig: () => config } as any;
+    const proxy = new ProxyServer(mgr, { logLevel: 'silent' });
+    const seen: Array<{ hostname: string; viaUpstream: boolean; isHttp: boolean }> = [];
+    proxy.setRequestObserver((hostname, viaUpstream, isHttp) => {
+      seen.push({ hostname, viaUpstream, isHttp });
+    });
+
+    (proxy as any).handleRequest({
+      hostname: 'example.com',
+      isHttp: true,
+      request: { url: 'http://example.com/' },
+    });
+    (proxy as any).handleRequest({
+      hostname: 'example.com',
+      isHttp: false,
+      request: { url: 'example.com:443' },
+    });
+
+    assert.deepStrictEqual(seen, [
+      { hostname: 'example.com', viaUpstream: true, isHttp: true },
+      { hostname: 'example.com', viaUpstream: true, isHttp: false },
+    ]);
+  });
 });

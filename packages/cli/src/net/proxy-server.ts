@@ -30,13 +30,13 @@ export class ProxyServer {
   private static readonly NO_CONFIG_WARN_INTERVAL_MS = 30_000;
   private lastNoConfigWarnAt = 0;
   private suppressedNoConfigWarnCount = 0;
-  private requestObserver: ((hostname: string, viaUpstream: boolean) => void) | null = null;
+  private requestObserver: ((hostname: string, viaUpstream: boolean, isHttp: boolean) => void) | null = null;
   private connectObserver: ((info: { hostname: string; ok: boolean; statusCode?: number }) => void) | null =
     null;
   private readonly hostConnections = new Map<string, Set<number | string>>();
   private readonly connectionHosts = new Map<string, string>();
 
-  setRequestObserver(fn: ((hostname: string, viaUpstream: boolean) => void) | null): void {
+  setRequestObserver(fn: ((hostname: string, viaUpstream: boolean, isHttp: boolean) => void) | null): void {
     this.requestObserver = fn;
   }
 
@@ -211,7 +211,7 @@ export class ProxyServer {
     }
 
     if (hostname) {
-      this.requestObserver?.(hostname, viaUpstream);
+      this.requestObserver?.(hostname, viaUpstream, params.isHttp === true);
     }
     return result;
   }
