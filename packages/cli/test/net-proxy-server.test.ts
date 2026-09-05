@@ -27,7 +27,7 @@ describe('ProxyServer hostname extraction', () => {
 
     assert.deepStrictEqual(res, {
       upstreamProxyUrl: 'http://user:pass@gateway.aluvia.io:8080',
-      customTag: 'example.com',
+      customTag: { hostname: 'example.com', credentialKind: 'byo', connectionId: undefined },
     });
   });
 
@@ -55,7 +55,7 @@ describe('ProxyServer hostname extraction', () => {
 
     assert.deepStrictEqual(res, {
       upstreamProxyUrl: 'http://user:pass@gateway.aluvia.io:8080',
-      customTag: 'example.com',
+      customTag: { hostname: 'example.com', credentialKind: 'byo', connectionId: undefined },
     });
   });
 
@@ -96,5 +96,56 @@ describe('ProxyServer hostname extraction', () => {
       { hostname: 'example.com', viaUpstream: true, isHttp: true },
       { hostname: 'example.com', viaUpstream: true, isHttp: false },
     ]);
+  });
+});
+
+describe('CONNECT attribution evidence', () => {
+  test('captures actual credential source and connection before a provider switch; rejects failed CONNECT', async () => {
+    const mgr = {
+      credentialKind: 'aluvia',
+      connectionId: 23,
+      getConfig: () => ({
+        rawProxy: {
+          protocol: 'http',
+          host: 'localhost',
+          port: 9999,
+          username: 'fixture',
+          password: 'fixture',
+        },
+        rules: ['*'],
+      }),
+    } as any;
+    const proxy = new ProxyServer(mgr, { logLevel: 'silent' });
+    const events: any[] = [];
+    proxy.setConnectObserver((event) => events.push(event));
+    const prepared = (proxy as any).handleRequest({
+      hostname: 'example.com',
+      isHttp: false,
+      request: { url: 'example.com:443' },
+    });
+    assert.deepStrictEqual(prepared.customTag, {
+      hostname: 'example.com',
+      credentialKind: 'aluvia',
+      connectionId: 23,
+    });
+    mgr.credentialKind = 'byo';
+    mgr.connectionId = undefined;
+    await proxy.start();
+    try {
+      (proxy as any).server.emit('tunnelConnectResponded', {
+        customTag: prepared.customTag,
+        response: { statusCode: 200 },
+      });
+      (proxy as any).server.emit('tunnelConnectResponded', {
+        customTag: prepared.customTag,
+        response: { statusCode: 503 },
+      });
+      assert.equal(events[0].credentialKind, 'aluvia');
+      assert.equal(events[0].connectionId, 23);
+      assert.equal(events[0].ok, true);
+      assert.equal(events[1].ok, false);
+    } finally {
+      await proxy.stop();
+    }
   });
 });

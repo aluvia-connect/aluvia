@@ -8,7 +8,7 @@ import { handleGeos } from './geos.js';
 import { handleProxy } from './proxy.js';
 import { handleProxyDaemon } from './proxy-daemon.js';
 import { PaymentRequiredError } from './net/errors.js';
-import { pendingAluviaInstallBeacon } from './meta-aluvia-install.js';
+import { pendingAttributionDrain } from './growth-attribution.js';
 import { isCapturing, OutputCapture } from './output-capture.js';
 
 export function output(data: Record<string, unknown>, exitCode = 0): never {
@@ -16,10 +16,10 @@ export function output(data: Record<string, unknown>, exitCode = 0): never {
     throw new OutputCapture(data, exitCode);
   }
   console.log(JSON.stringify(data));
-  const pending = pendingAluviaInstallBeacon();
+  const pending = pendingAttributionDrain();
   if (pending) {
-    // JSON is already on stdout. Stay alive until the fire-and-forget GET settles
-    // so process.exit does not drop the Pixel request.
+    // Print immediately, then allow the bounded first-party drain to finish.
+    // Unacknowledged work stays on disk for a later setup or daemon run.
     void pending.finally(() => process.exit(exitCode));
     return undefined as never;
   }

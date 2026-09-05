@@ -62,22 +62,20 @@ aluvia help [--json]               Command list as JSON
 
 They can also paste a key (`aluvia auth <key>`) or their own proxy (`aluvia proxy-provider <url>`).
 
-## Meta Pixel
+## Optional acquisition attribution
 
-When `setup` first reaches `ready: true`, the CLI sends one best-effort GET to `https://www.facebook.com/tr` with custom event `aluvia_install`, once per install id.
+A consented website install command can include `ALUVIA_ATTRIBUTION_TOKEN`, a short-lived opaque token. Setup saves a valid token before work starts so an incomplete invocation can resume. The token binds only to an existing install through `https://api.aluvia.io/v1/growth/install-attribution`. It cannot start a trial or grant account access. Binding uses the existing install credential in the first-party header, without a Bearer token. Custom API endpoint settings do not change this destination.
 
-The first successful client request the local proxy sends through upstream (HTTPS CONNECT 200 or HTTP) sends custom event `first_proxy_request`, once per install id (`$ALUVIA_HOME/meta-first-proxy-request-fired`). `setup`, `proxy-on`, and `rotate-ip` do not fire this by themselves. Session probes to echo hosts are skipped.
+Two internal CLI reports can follow a confirmed binding:
 
-Pixel only — not CAPI. A failed or missing beacon never blocks setup or proxy traffic. Click/browser ids are taken from env when present and are never invented.
+- `setup_ready` (`aluvia_setup_ready_v1`): the browser is aimed, the proxy is healthy, and the session probe succeeds with Aluvia credentials.
+- `first_proxy_request` (`aluvia_connect_established_v1`): an Aluvia CONNECT returns 200 for a non-loopback, non-probe host. HTTP preparation, direct traffic, BYO proxies, and failed CONNECTs do not qualify.
 
-Optional env (website clipboard join):
+Both have evidence source `cli_reported`. A CONNECT receipt does not prove a page loaded or a task succeeded. The CLI sends no Meta Pixel or CAPI request. It sends no browser identifiers, destination hosts, IP addresses, or install credential in report bodies.
 
-| Variable | Role |
-| --- | --- |
-| `ALUVIA_META_PIXEL_ID` | Pixel id (default `2173975809846289`) |
-| `ALUVIA_META_FBC` | `_fbc` click cookie |
-| `ALUVIA_META_FBP` | `_fbp` browser cookie |
-| `ALUVIA_META_FBCLID` | `fbclid` click id. If set and `ALUVIA_META_FBC` is not, `fbc` is built as `fb.1.{timestamp}.{fbclid}` |
+State lives separately from credentials under `$ALUVIA_HOME/growth-attribution` (or the default config directory), with directory mode 0700 and file mode 0600. Complete files are published atomically and exclusively. The original event ID, occurrence time, and connection ID remain pending across retries, restarts, and lost acknowledgements until a valid versioned receipt arrives. The first accepted token remains sticky; a conflicting or expired/revoked binding stops reports without changing install IDs.
+
+Each drain makes at most one binding request and one request per pending event, each with a 750 ms deadline. JSON output prints before the bounded drain finishes; proxy traffic never awaits it. Setup and the running daemon retry pending work, with daemon retries every minute. A disabled bridge (404), unavailable service, or an install not yet known to the service (401) leaves work pending. Terminal validation failures stop the affected report. No token means no attribution requests. The backend accepts new events only within seven days of occurrence; older offline reports can be rejected without changing their timestamps.
 
 ## License
 
