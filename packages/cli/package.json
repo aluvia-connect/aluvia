@@ -16,7 +16,7 @@
   "main": "./dist/esm/cli.js",
   "types": "./dist/types/cli.d.ts",
   "bin": {
-    "aluvia": "./dist/esm/cli.js"
+    "aluvia": "dist/esm/cli.js"
   },
   "files": [
     "dist/**/*",
