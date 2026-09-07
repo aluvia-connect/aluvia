@@ -131,6 +131,11 @@ export class ConfigManager {
   private accountConnectionId: number | undefined;
   private pollInFlight = false;
 
+  /** Source of the credentials actually used by this running proxy. */
+  get credentialKind(): 'aluvia' | 'byo' {
+    return this.localOnly ? 'byo' : 'aluvia';
+  }
+
   /** Public read-only access to the account connection ID. */
   get connectionId(): number | undefined {
     return this.accountConnectionId;

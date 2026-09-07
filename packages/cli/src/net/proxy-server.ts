@@ -22,6 +22,9 @@ export type ProxyServerInfo = {
  * ProxyServer manages the local HTTP(S) proxy that routes traffic
  * through Aluvia or directly based on rules.
  */
+type ConnectEvidence = { hostname: string; credentialKind: 'aluvia' | 'byo'; connectionId?: number };
+type ConnectOutcome = ConnectEvidence & { ok: boolean; statusCode?: number };
+
 export class ProxyServer {
   private server: ProxyChainServer | null = null;
   private readonly configManager: ConfigManager;
@@ -30,19 +33,16 @@ export class ProxyServer {
   private static readonly NO_CONFIG_WARN_INTERVAL_MS = 30_000;
   private lastNoConfigWarnAt = 0;
   private suppressedNoConfigWarnCount = 0;
-  private requestObserver: ((hostname: string, viaUpstream: boolean) => void) | null = null;
-  private connectObserver: ((info: { hostname: string; ok: boolean; statusCode?: number }) => void) | null =
-    null;
+  private requestObserver: ((hostname: string, viaUpstream: boolean, isHttp: boolean) => void) | null = null;
+  private connectObserver: ((info: ConnectOutcome) => void) | null = null;
   private readonly hostConnections = new Map<string, Set<number | string>>();
   private readonly connectionHosts = new Map<string, string>();
 
-  setRequestObserver(fn: ((hostname: string, viaUpstream: boolean) => void) | null): void {
+  setRequestObserver(fn: ((hostname: string, viaUpstream: boolean, isHttp: boolean) => void) | null): void {
     this.requestObserver = fn;
   }
 
-  setConnectObserver(
-    fn: ((info: { hostname: string; ok: boolean; statusCode?: number }) => void) | null,
-  ): void {
+  setConnectObserver(fn: ((info: ConnectOutcome) => void) | null): void {
     this.connectObserver = fn;
   }
 
@@ -103,12 +103,15 @@ export class ProxyServer {
         this.forgetConnection(connectionId);
       });
       this.server.on('tunnelConnectResponded', (info) => {
-        const hostname = typeof info.customTag === 'string' ? info.customTag : '';
-        this.connectObserver?.({ hostname, ok: true, statusCode: info.response?.statusCode ?? 200 });
+        const evidence = info.customTag as ConnectEvidence | undefined;
+        if (!evidence || typeof evidence.hostname !== 'string') return;
+        const statusCode = info.response?.statusCode;
+        this.connectObserver?.({ ...evidence, ok: statusCode === 200, statusCode });
       });
       this.server.on('tunnelConnectFailed', (info) => {
-        const hostname = typeof info.customTag === 'string' ? info.customTag : '';
-        this.connectObserver?.({ hostname, ok: false, statusCode: info.response?.statusCode });
+        const evidence = info.customTag as ConnectEvidence | undefined;
+        if (!evidence || typeof evidence.hostname !== 'string') return;
+        this.connectObserver?.({ ...evidence, ok: false, statusCode: info.response?.statusCode });
       });
 
       // Get the actual port (especially important when port was 0)
@@ -206,12 +209,19 @@ export class ProxyServer {
         const upstreamProxyUrl = `${protocol}://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}`;
         this.logger.debug(`Hostname ${hostname} routing through Aluvia`);
         viaUpstream = true;
-        result = { upstreamProxyUrl, customTag: hostname };
+        result = {
+          upstreamProxyUrl,
+          customTag: {
+            hostname,
+            credentialKind: this.configManager.credentialKind ?? 'byo',
+            connectionId: this.configManager.connectionId,
+          } satisfies ConnectEvidence,
+        };
       }
     }
 
     if (hostname) {
-      this.requestObserver?.(hostname, viaUpstream);
+      this.requestObserver?.(hostname, viaUpstream, params.isHttp === true);
     }
     return result;
   }

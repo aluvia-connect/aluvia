@@ -27,6 +27,8 @@ import {
   writeChromeProxyPolicy,
 } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
+import { captureAttributionToken, drainAttribution, reportSetupReady } from './growth-attribution.js';
+import { DEFAULT_PROBE_URLS, probeTargetUrls } from './session-probe-hosts.js';
 import { installProxySkill } from './proxy-skill.js';
 import {
   DEFAULT_CONTROL_PORT,
@@ -45,6 +47,8 @@ import {
   type ProxyEgress,
   type ProxyJson,
 } from './proxy-state.js';
+
+export { DEFAULT_PROBE_URLS };
 
 const NOT_RUNNING = 'proxyd is not running. Run `aluvia start`.';
 const CONTROL_TIMEOUT = 'proxyd did not respond. Run `aluvia status`.';
@@ -154,12 +158,6 @@ function savedDaemonArgs(existing: ProxyJson, args: string[] = []): string[] {
 }
 
 const DATACENTER_IP = '104.30.175.37';
-/** ipify alone flakes 503 while other echo hosts already succeed on the same session. */
-export const DEFAULT_PROBE_URLS = [
-  'https://api.ipify.org/',
-  'https://ifconfig.me/ip',
-  'https://icanhazip.com/',
-];
 const UPSTREAM_UNAVAILABLE_ERROR = 'Upstream gateway returned 503 (590 UPSTREAM503).';
 const UPSTREAM_UNAVAILABLE_CODE = 'upstream_unavailable';
 const UPSTREAM_UNAVAILABLE_NEXT = 'Run `aluvia rotate-ip` then reload the tab.';
@@ -174,12 +172,6 @@ export type TunnelProbe = {
 function datacenterIp(): string {
   const raw = (process.env.ALUVIA_DATACENTER_IP ?? '').trim();
   return raw || DATACENTER_IP;
-}
-
-function probeTargetUrls(): string[] {
-  const raw = (process.env.ALUVIA_PROBE_URL ?? '').trim();
-  if (raw) return [raw];
-  return DEFAULT_PROBE_URLS;
 }
 
 function probeTargetUrl(): string {
@@ -1056,6 +1048,7 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
 }
 
 async function handleSetup(args: string[]): Promise<void> {
+  captureAttributionToken();
   const restoreUrl = parseRestoreUrl(args);
   const skill = installProxySkill();
   const binPath = writePathBin();
@@ -1070,6 +1063,7 @@ async function handleSetup(args: string[]): Promise<void> {
   const priorSessionId = (readProxyJson()?.sessionId ?? '').trim() || null;
   // 1. Reuse the one saved connection (never POST a second).
   const result = await runAttach(args);
+  void drainAttribution();
   // 2. proxy-on / rules ['*'].
   await postEgress(true);
   const state = readProxyJson();
@@ -1116,6 +1110,13 @@ async function handleSetup(args: string[]): Promise<void> {
     }
   }
   const ready = aimed && healthy && probe.ok;
+  void reportSetupReady({
+    aimed,
+    healthy,
+    probeOk: probe.ok,
+    credentialKind: statusJson.credentialKind === 'aluvia' ? 'aluvia' : 'byo',
+    connectionId: typeof statusJson.connectionId === 'number' ? statusJson.connectionId : undefined,
+  });
   const skillPath = skill.skillPaths[0] ?? null;
   // A skipped probe (Chrome not aimed) is not a dead session — next is chromeCommand.
   const unavailable = aimed && isDeadSessionProbe(probe);

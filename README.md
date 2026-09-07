@@ -1,5 +1,7 @@
 # Aluvia
 
+Global proxy IPs for AI agents.
+
 A cloud agent's browser uses the datacenter's country. Sites treat that country as the agent's location, then show that country's prices, catalog, and language, or say the content is not available there. Aluvia lets the agent pick a country. Traffic leaves through a residential or mobile IP in that country, so the site serves that country's page.
 
 The agent's country is the datacenter's country. That is often the wrong country for the site. Set a country (`aluvia proxy-on --geo US`; run `aluvia geos` for the list). Aluvia sends the browser through a residential or mobile IP there. The site sees that country's IP and returns the matching page.
@@ -9,7 +11,7 @@ A residential IP in the right country sometimes also clears a 403, CAPTCHA, or C
 The product is a local CLI. The human does not SSH into the VM or edit environment variables. They talk to the agent. The agent runs `aluvia`.
 
 ```
-Chrome  ──aim──▶  127.0.0.1:18787  ──egress──▶  Aluvia mobile IP
+Chrome  ──aim──▶  127.0.0.1:18787  ──egress──▶  Aluvia residential or mobile IP
    ▲                     │                         or
    │                     │                      this VM's
    │                     ▼                      datacenter IP
@@ -20,6 +22,23 @@ if needed
 **Aim** and **egress** are separate. Aim is “is Chrome talking to the local proxy?” Egress is “does that proxy send traffic through Aluvia, or straight out of the VM?” `proxy-on` / `proxy-off` flip egress. They do not restart Chrome.
 
 Local proxy: `http://127.0.0.1:18787`. Control: `http://127.0.0.1:18788`. Every command prints JSON on stdout. Read `next`. Never print API keys.
+
+---
+
+## Wrong country / geo
+
+The agent's country is the datacenter's country. Pick a country (`aluvia geos`, then `aluvia proxy-on --geo US`). Traffic leaves through a residential or mobile IP there. Country only, not city. Not a human VPN.
+
+Live pages: [https://aluvia.io/geo](https://aluvia.io/geo)
+
+- [https://aluvia.io/geo/grok-bot](https://aluvia.io/geo/grok-bot)
+- [https://aluvia.io/geo/cursor](https://aluvia.io/geo/cursor)
+- [https://aluvia.io/geo/codex](https://aluvia.io/geo/codex)
+- [https://aluvia.io/geo/playwright](https://aluvia.io/geo/playwright)
+- [https://aluvia.io/geo/claude](https://aluvia.io/geo/claude)
+- [https://aluvia.io/geo/openclaw](https://aluvia.io/geo/openclaw)
+- [https://aluvia.io/geo/hermes](https://aluvia.io/geo/hermes)
+- [https://aluvia.io/geo/without-a-vpn](https://aluvia.io/geo/without-a-vpn)
 
 ---
 
@@ -35,7 +54,7 @@ npx aluvia-cli setup
 
 That starts the daemon, aims Chrome at `127.0.0.1:18787`, and copies the [agent skill](./skills/aluvia/SKILL.md) into the skill dirs on this machine.
 
-A first setup starts a free trial. No API key.
+First 10 MB free, no account, no API key. Paid $2/GB. Docs: https://aluvia.io/docs
 
 ---
 

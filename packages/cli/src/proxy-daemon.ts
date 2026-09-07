@@ -4,6 +4,7 @@ import { isLoopbackHostname } from './net/loopback.js';
 import { ConfigManager } from './net/config-manager.js';
 import { ProxyServer } from './net/proxy-server.js';
 import { saveConnectionId } from './config.js';
+import { drainAttribution, reportFirstProxyRequest } from './growth-attribution.js';
 import { createControlServer } from './proxy-control-server.js';
 import {
   DEFAULT_CONTROL_PORT,
@@ -218,6 +219,15 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
     if (isLoopbackHostname(outcome.hostname) || !outcome.ok) return;
     maybeVerifyAttach();
     persist(true);
+    // customTag is only set when the CONNECT was sent through upstream.
+    reportFirstProxyRequest({
+      hostname: outcome.hostname,
+      viaUpstream: true,
+      isHttp: false,
+      connectOk: true,
+      credentialKind: outcome.credentialKind,
+      connectionId: outcome.connectionId,
+    });
   });
 
   writeProxyJson({
@@ -314,6 +324,7 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
         proxyUrl,
         controlUrl,
         connectionId: netState.connectionId ?? null,
+        credentialKind: config.credentialKind,
         sessionId: netState.sessionId,
         targetGeo: netState.targetGeo,
         rules: netState.rules,
@@ -399,6 +410,11 @@ export async function runProxyDaemon(opts: ProxyDaemonOptions): Promise<void> {
   });
 
   persist(true);
+  void drainAttribution();
+  const attributionRetry = setInterval(() => {
+    void drainAttribution();
+  }, 60_000);
+  attributionRetry.unref();
 
   process.on('SIGINT', () => {
     void shutdown();
