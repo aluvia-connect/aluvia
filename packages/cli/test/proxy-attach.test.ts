@@ -6,6 +6,7 @@ import path from 'node:path';
 import { getStoredConnectionId } from '../src/config.js';
 import { captureOutput } from '../src/output-capture.js';
 import { handleProxy } from '../src/proxy.js';
+import { DEFAULT_SETUP_URL } from '../src/setup-page.js';
 import { attachWaitMs, DEFAULT_ATTACH_WAIT_MS } from '../src/proxy-attach.js';
 import { readProxyJson, writeProxyJson } from '../src/proxy-state.js';
 import { createMockAluviaApi } from './helpers/mock-aluvia-api.js';
@@ -15,6 +16,7 @@ import { findFreePort } from './helpers/ports.js';
 
 const ENV_KEYS = [
   'ALUVIA_HOME',
+  'ALUVIA_SKILL_DIRS',
   'ALUVIA_API_KEY',
   'ALUVIA_API_BASE_URL',
   'ALUVIA_PROXY_PORT',
@@ -79,6 +81,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       dataPort = await findFreePort();
       controlPort = await findFreePort();
       process.env.ALUVIA_HOME = home;
+      process.env.ALUVIA_SKILL_DIRS = path.join(home, 'skills');
       process.env.ALUVIA_API_KEY = 'test-key';
       process.env.ALUVIA_API_BASE_URL = api.url;
       process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
@@ -318,6 +321,9 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(first.data.aimed, true);
       assert.match(String(first.data.next), /Reload the tab/);
 
+      // Setup keeps its verified state. A later status request can ask for a reload.
+      await captureOutput(() => handleProxy(['status']));
+
       process.env.ALUVIA_ATTACH_WAIT_MS = '50';
       const probed = await captureOutput(() => handleProxy(['status']));
       assert.strictEqual(probed.isError, false, String(probed.data.error ?? ''));
@@ -494,7 +500,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(result.data.egress, 'aluvia');
       assert.match(String(result.data.next), /chromeCommand/);
       assert.match(String(result.data.next), /quits Chrome first/);
-      assert.match(String(result.data.next), /aluvia setup/);
+      assert.match(String(result.data.next), /npx aluvia-cli setup/);
       assert.ok(!String(result.data.next).includes('Do not run setup again'));
       assert.ok(String(result.data.chromeCommand).includes(`--proxy-server=http://127.0.0.1:${dataPort}`));
       assert.ok(typeof result.data.persistLimit === 'string');
@@ -517,32 +523,53 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(status.data.aimed, true);
     });
 
-    test('setup without --url, not aimed, fails fast and asks for --url', async () => {
-      await startDaemon();
+    test('bare setup supplies a default page and recovery command when Chrome cannot launch', async () => {
       delete process.env.ALUVIA_ATTACH_WAIT_MS;
-      assert.strictEqual(attachWaitMs(), DEFAULT_ATTACH_WAIT_MS);
-      const expectBefore = readProxyJson()?.attach.expectConnectAfter ?? null;
       const started = Date.now();
       const result = await captureOutput(() => handleProxy(setupArgsNoUrl(dataPort, controlPort)));
-      const elapsed = Date.now() - started;
-      assert.strictEqual(result.isError, true);
-      assert.match(String(result.data.error), /--url/);
-      assert.match(String(result.data.next), /--url/);
-      assert.match(String(result.data.next), /https-page/);
+      assert.strictEqual(result.isError, false, String(result.data.error ?? ''));
       assert.strictEqual(result.data.aimed, false);
       assert.strictEqual(result.data.ready, false);
       assert.strictEqual(result.data.needsChromeRestart, true);
-      assert.strictEqual(result.data.restoreUrl, null);
-      assert.strictEqual(result.data.chromeCommand, undefined);
-      assert.strictEqual(readProxyJson()?.attach.expectConnectAfter ?? null, expectBefore);
-      assert.ok(
-        elapsed < 5_000,
-        `setup without --url took ${elapsed}ms; must not wait DEFAULT_ATTACH_WAIT_MS=${DEFAULT_ATTACH_WAIT_MS}`,
-      );
-      assert.ok(
-        elapsed < DEFAULT_ATTACH_WAIT_MS / 4,
-        `setup without --url took ${elapsed}ms; production default wait is ${DEFAULT_ATTACH_WAIT_MS}ms`,
-      );
+      assert.strictEqual(result.data.restoreUrl, DEFAULT_SETUP_URL);
+      assert.match(String(result.data.chromeCommand), /https:\/\/example\.com\//);
+      assert.match(String(result.data.next), /npx aluvia-cli setup/);
+      assert.ok(!String(result.data.next).includes('--url'));
+      assert.ok(typeof readProxyJson()?.attach.expectConnectAfter === 'number');
+      assert.ok(Date.now() - started < 5_000, 'failed launch must not wait 30 seconds');
+    });
+
+    test('bare setup completes on a fresh machine and a second run keeps the browser and session', async () => {
+      process.env.ALUVIA_ATTACH_WAIT_MS = '2000';
+      assert.strictEqual(readProxyJson(), null);
+      const pending = captureOutput(() => handleProxy(setupArgsNoUrl(dataPort, controlPort)));
+      // Wait for setup to arm browser verification before simulating its CONNECT.
+      const deadline = Date.now() + 2000;
+      while (readProxyJson()?.attach.expectConnectAfter == null && Date.now() < deadline) {
+        await delay(10);
+      }
+      await connectViaProxy(dataPort, new URL(DEFAULT_SETUP_URL).hostname).catch(() => undefined);
+      const first = await pending;
+      assert.strictEqual(first.isError, false, String(first.data.error ?? ''));
+      assert.strictEqual(first.data.ready, true);
+      assert.strictEqual(first.data.aimed, true);
+      assert.strictEqual(first.data.healthy, true);
+      assert.strictEqual(first.data.needsChromeRestart, false);
+      assert.strictEqual(first.data.restoreUrl, DEFAULT_SETUP_URL);
+      assert.strictEqual(first.data.chromeCommand, undefined);
+      assert.deepStrictEqual(readProxyJson()?.rules, ['*']);
+      const before = readProxyJson()!;
+      assert.strictEqual(before.attach.reloadAskedAt, null);
+      assert.ok(fs.existsSync(path.join(home, 'skills', 'aluvia', 'SKILL.md')));
+      const second = await captureOutput(() => handleProxy(setupArgsNoUrl(dataPort, controlPort)));
+      assert.strictEqual(second.data.ready, true);
+      assert.strictEqual(second.data.needsChromeRestart, false);
+      assert.strictEqual(second.data.chromeCommand, undefined);
+      const after = readProxyJson()!;
+      assert.strictEqual(after.pid, before.pid);
+      assert.strictEqual(after.connectionId, before.connectionId);
+      assert.strictEqual(after.sessionId, before.sessionId);
+      assert.strictEqual(after.attach.expectConnectAfter, before.attach.expectConnectAfter);
     });
 
     test('lastConnect after expectConnectAfter is aimed; setup does not reset or restart', async () => {
@@ -751,6 +778,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       dataPort = await findFreePort();
       controlPort = await findFreePort();
       process.env.ALUVIA_HOME = home;
+      process.env.ALUVIA_SKILL_DIRS = path.join(home, 'skills');
       process.env.ALUVIA_API_KEY = 'test-key';
       process.env.ALUVIA_API_BASE_URL = api.url;
       process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
@@ -852,6 +880,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       dataPort = await findFreePort();
       controlPort = await findFreePort();
       process.env.ALUVIA_HOME = home;
+      process.env.ALUVIA_SKILL_DIRS = path.join(home, 'skills');
       process.env.ALUVIA_API_KEY = 'test-key';
       process.env.ALUVIA_API_BASE_URL = api.url;
       process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';
@@ -938,6 +967,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       dataPort = await findFreePort();
       controlPort = await findFreePort();
       process.env.ALUVIA_HOME = home;
+      process.env.ALUVIA_SKILL_DIRS = path.join(home, 'skills');
       process.env.ALUVIA_API_KEY = 'test-key';
       process.env.ALUVIA_API_BASE_URL = api.url;
       process.env.ALUVIA_GATEWAY_HOST = '127.0.0.1';

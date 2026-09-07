@@ -40,7 +40,7 @@ export function buildHelpJson(): {
           {
             flag: '--url <url>',
             description:
-              'Required when Chrome is not already aimed. Open this page after the Chrome restart so a CONNECT can land.',
+              'Optional. Open this page after the Chrome restart. Without it, setup opens https://example.com/ to check the browser connection.',
           },
         ],
       },

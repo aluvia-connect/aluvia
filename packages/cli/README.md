@@ -12,7 +12,17 @@ The full product write-up is in the [repository README](../../README.md). The ag
 npx aluvia-cli setup
 ```
 
-Or `npm i -g aluvia-cli` and run `aluvia`. Node.js 18+.
+Run the command on the machine where the agent's browser runs. Node.js 18+.
+
+No target page URL is required. Setup installs the command launcher and skill, starts the local proxy, and configures Chrome. Initial configuration can restart Chrome and opens `https://example.com/`, a small HTTPS test page. Use optional `--url <page>` to open a specific page instead.
+
+Setup enables proxy traffic. `ready: true` requires the browser to reach the local proxy and the upstream connection check to pass. Rerunning setup keeps a working browser and session. If setup needs recovery, follow the JSON `next` field.
+
+To choose a country, run `aluvia geos`, then `aluvia proxy-on --geo US` (replace `US`), reload the target page, and run `aluvia status`. A working proxy does not guarantee access to every site.
+
+If `aluvia` is not on PATH, replace `aluvia` with `npx aluvia-cli`. For example: `npx aluvia-cli status`.
+
+Or install globally with `npm i -g aluvia-cli`.
 
 First 10 MB free, no account, no API key. Paid $2/GB. Docs: https://aluvia.io/docs. The human does not SSH or edit env vars — they paste a key or proxy URL in chat, and the agent runs the command.
 
@@ -69,7 +79,7 @@ A consented website install command can include `ALUVIA_ATTRIBUTION_TOKEN`, a sh
 Two internal CLI reports can follow a confirmed binding:
 
 - `setup_ready` (`aluvia_setup_ready_v1`): the browser is aimed, the proxy is healthy, and the session probe succeeds with Aluvia credentials.
-- `first_proxy_request` (`aluvia_connect_established_v1`): an Aluvia CONNECT returns 200 for a non-loopback, non-probe host. HTTP preparation, direct traffic, BYO proxies, and failed CONNECTs do not qualify.
+- `first_proxy_request` (`aluvia_connect_established_v1`): an Aluvia CONNECT returns 200 for a non-loopback, non-probe host. The automatic setup test host, HTTP preparation, direct traffic, BYO proxies, and failed CONNECTs do not qualify.
 
 Both have evidence source `cli_reported`. A CONNECT receipt does not prove a page loaded or a task succeeded. The CLI sends no Meta Pixel or CAPI request. It sends no browser identifiers, destination hosts, IP addresses, or install credential in report bodies.
 

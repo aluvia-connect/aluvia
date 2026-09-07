@@ -212,7 +212,7 @@ test('setup receipt requires all readiness evidence and an Aluvia connection', a
 test('only successful Aluvia CONNECT qualifies, excluding all probes, HTTP, direct, BYO and loopback', async () => {
   const g = await seed();
   const valid = {
-    hostname: 'example.com',
+    hostname: 'customer.example',
     viaUpstream: true,
     isHttp: false,
     connectOk: true,
@@ -228,6 +228,8 @@ test('only successful Aluvia CONNECT qualifies, excluding all probes, HTTP, dire
     { hostname: 'api.ipify.org' },
     { hostname: 'ifconfig.me' },
     { hostname: 'icanhazip.com' },
+    { hostname: 'example.com' },
+    { hostname: 'EXAMPLE.COM.' },
     { viaUpstream: false },
     { isHttp: true },
     { connectOk: false },
@@ -268,7 +270,7 @@ test('repeated CONNECTs do not retry or rewrite a pending report on the traffic 
   reply = async (url) =>
     url.endsWith('install-events') ? new Response(null, { status: 503 }) : success(url);
   const trigger = {
-    hostname: 'example.com',
+    hostname: 'customer.example',
     viaUpstream: true,
     isHttp: false,
     connectOk: true,

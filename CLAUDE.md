@@ -45,7 +45,7 @@ packages/
 - **ESM-first**: Source uses `.js` extensions in imports (required for ESM resolution). `"type": "module"`.
 - **Node.js native test runner**: Tests use `node:test` and `node:assert`, NOT Jest/Mocha. Run via tsx loader.
 - **Error classes use `Object.setPrototypeOf`**: Required for proper `instanceof` checks with TypeScript class inheritance.
-- **Runtime dependency**: `proxy-chain` only.
+- **Runtime dependencies**: `proxy-chain` for proxy routing; `ws` for graceful Chrome shutdown through an existing local debugging connection.
 
 ## Gotchas
 
