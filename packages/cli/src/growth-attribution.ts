@@ -5,6 +5,7 @@ import { configDir, getStoredInstallId } from './config.js';
 import { isCapturing } from './output-capture.js';
 import { isLoopbackHostname } from './net/loopback.js';
 import { DEFAULT_PROBE_URLS, isSessionProbeHostname } from './session-probe-hosts.js';
+import { isSetupPageHostname } from './setup-page.js';
 
 // Attribution cannot inherit user-controlled API/proxy destinations: the install ID is a credential.
 const ORIGIN = 'https://api.aluvia.io/v1/growth';
@@ -263,6 +264,7 @@ export function isFirstProxyRequestTrigger(info: FirstProxyRequestTrigger): bool
     Boolean(hostname) &&
     !isLoopbackHostname(hostname) &&
     !isSessionProbeHostname(hostname) &&
+    !isSetupPageHostname(hostname) &&
     !DEFAULT_PROBE_URLS.some((url) => new URL(url).hostname === hostname) &&
     info.viaUpstream &&
     !info.isHttp &&

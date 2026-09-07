@@ -44,13 +44,13 @@ Live pages: [https://aluvia.io/geo](https://aluvia.io/geo)
 
 ## Install
 
-Node.js 18+. If `aluvia` is not on PATH, prefix every command with `npx aluvia-cli`.
+Node.js 18+. If `aluvia` is not on PATH, replace `aluvia` with `npx aluvia-cli`. For example: `npx aluvia-cli status`.
 
 ```bash
 npx aluvia-cli setup
 ```
 
-`--url <page>` is optional. If you have the blocked page, pass it so Chrome opens that tab after the restart.
+Run this on the machine where the agent's browser runs. No target page URL is required. When Chrome needs configuration, setup restarts it with proxy settings and opens `https://example.com/`, a small HTTPS test page. `--url <page>` is optional: supply it to open a specific page instead. Setup enables proxy traffic and checks the upstream connection before reporting `ready: true`.
 
 That starts the daemon, aims Chrome at `127.0.0.1:18787`, and copies the [agent skill](./skills/aluvia/SKILL.md) into the skill dirs on this machine.
 
@@ -77,7 +77,7 @@ Read the JSON. **`next` is the next action.**
 
 One restart is expected. `setup` tries to do it. If it cannot, run `chromeCommand`, then `aluvia setup` again. Do not launch a second Chrome.
 
-Re-running setup while aimed is a no-op if the tunnel is live.
+Re-running setup while aimed keeps the same browser and live session, and checks the connection again.
 
 Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab, then `aluvia status`. If that status says `aimed` is false, run setup again. If `aimed` is true but `ready` is false, follow `next` — do not assume the website is down.
 

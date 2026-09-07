@@ -30,10 +30,10 @@ import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-c
 import { captureAttributionToken, drainAttribution, reportSetupReady } from './growth-attribution.js';
 import { DEFAULT_PROBE_URLS, probeTargetUrls } from './session-probe-hosts.js';
 import { installProxySkill } from './proxy-skill.js';
+import { DEFAULT_SETUP_URL } from './setup-page.js';
 import {
   DEFAULT_CONTROL_PORT,
   DEFAULT_DATA_PORT,
-  defaultAttach,
   egressFromRules,
   isLiveAim,
   nextAsksReload,
@@ -427,29 +427,6 @@ function rotateProbeFailure(probe: TunnelProbe): { error: string; code: string; 
 
 function aimedFrom(state: ProxyJson | null): boolean {
   return isLiveAim(state?.attach, state?.lastConnect);
-}
-
-async function attachAlreadyAimed(state: ProxyJson | null): Promise<boolean> {
-  if (!state) return false;
-  const last = isLive(state) ? await readLastConnect() : state.lastConnect;
-  const probe = resolveAimProbe(state.attach ?? defaultAttach(), last);
-  return probe.aimed && !probe.failed;
-}
-
-function failMissingSetupUrl(extra?: Record<string, unknown>): never {
-  output(
-    {
-      error: 'setup requires --url <https-page> so Chrome opens a real page after the restart.',
-      next: 'Pass --url <https-page> (the blocked address-bar URL) and run `aluvia setup` again.',
-      aimed: false,
-      ready: false,
-      needsChromeRestart: true,
-      restoreUrl: null,
-      status: 'needs_ui',
-      ...extra,
-    },
-    1,
-  );
 }
 
 async function readLastConnect(): Promise<LastConnectSnapshot> {
@@ -898,7 +875,7 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
       ? 'If the platform replaces this Chrome without flags, aim is gone. Run `aluvia status`; if aimed is false, run `aluvia setup` and chromeCommand again.'
       : undefined;
 
-  const restoreUrl = parseRestoreUrl(args);
+  const restoreUrl = parseRestoreUrl(args) ?? DEFAULT_SETUP_URL;
   const chromeCommand = chromeRestartCommand(dataPort, restoreUrl);
   const lastConnect = await readLastConnect();
   const probe = resolveAimProbe(state.attach, lastConnect);
@@ -928,10 +905,6 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
     };
   }
 
-  if (!restoreUrl) {
-    failMissingSetupUrl();
-  }
-
   const expectConnectAfter = Date.now();
   await persistAttach({
     status: 'needs_ui',
@@ -942,6 +915,7 @@ async function runAttach(args: string[]): Promise<AttachOutcome> {
 
   if (!skipChromeRestart()) {
     attachProgress(`restarting Chrome with proxy flags (quit, then launch on 127.0.0.1:${dataPort})`);
+    attachProgress('opening a page to check the browser connection');
   }
   const { launched } = await tryRestartChrome(dataPort, restoreUrl);
   // Restart skipped/failed: a CONNECT cannot appear unless a test set a short explicit wait.
@@ -1014,7 +988,7 @@ function setupNext(ready: boolean): string {
   if (ready) {
     return 'Chrome is aimed. Reload the tab. Use `aluvia proxy-off` to go direct and `aluvia proxy-on` to use Aluvia again. If still blocked, run `aluvia status`. If aimed is false, run `aluvia setup` again.';
   }
-  return 'Run chromeCommand (it quits Chrome first, then launches with proxy flags). If you launch without quitting, flags are ignored. Then run `aluvia setup` again.';
+  return 'Run chromeCommand (it quits Chrome first, then launches with proxy flags). If you launch without quitting, flags are ignored. Then run `npx aluvia-cli setup` again. No page URL is required.';
 }
 
 async function failIfPaymentRequired(res: { status: number; json: Record<string, unknown> }): Promise<void> {
@@ -1049,17 +1023,10 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
 
 async function handleSetup(args: string[]): Promise<void> {
   captureAttributionToken();
-  const restoreUrl = parseRestoreUrl(args);
+  // Reject an explicitly invalid URL before installing or starting anything.
+  parseRestoreUrl(args);
   const skill = installProxySkill();
   const binPath = writePathBin();
-  if (!restoreUrl && !(await attachAlreadyAimed(readProxyJson()))) {
-    failMissingSetupUrl({
-      skillPath: skill.skillPaths[0] ?? null,
-      skillPaths: skill.skillPaths,
-      ...(binPath ? { binPath } : {}),
-      ...(skill.error ? { skillError: skill.error } : {}),
-    });
-  }
   const priorSessionId = (readProxyJson()?.sessionId ?? '').trim() || null;
   // 1. Reuse the one saved connection (never POST a second).
   const result = await runAttach(args);
@@ -1120,7 +1087,9 @@ async function handleSetup(args: string[]): Promise<void> {
   const skillPath = skill.skillPaths[0] ?? null;
   // A skipped probe (Chrome not aimed) is not a dead session — next is chromeCommand.
   const unavailable = aimed && isDeadSessionProbe(probe);
-  return outputMaybeStamp({
+  // A successful setup already verified the browser. Advice to reload a target
+  // page must not invalidate that evidence or force another restart on rerun.
+  return output({
     next: unavailable ? UPSTREAM_UNAVAILABLE_NEXT : setupNext(ready),
     skillPath,
     ...statusJson,

@@ -45,8 +45,8 @@ describe('proxy help', () => {
       | { description?: string }
       | undefined;
     assert.ok(typeof urlOpt?.description === 'string');
-    assert.ok(!urlOpt.description.toLowerCase().includes('optional'));
-    assert.match(urlOpt.description, /Required when Chrome is not already aimed/);
+    assert.ok(urlOpt.description.toLowerCase().includes('optional'));
+    assert.match(urlOpt.description, /https:\/\/example\.com\//);
     assert.deepStrictEqual(start?.options, []);
   });
 

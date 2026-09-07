@@ -9,13 +9,13 @@ A cloud agent's browser uses the datacenter's country. Sites treat that country 
 
 Local proxy: `http://127.0.0.1:18787`. All JSON on stdout. Follow `next`. Never print API keys. One Chrome restart is expected. Do not launch a second Chrome.
 
-If `aluvia` is not on PATH, prefix with `npx aluvia-cli`.
+If `aluvia` is not on PATH, replace `aluvia` with `npx aluvia-cli`. For example: `npx aluvia-cli status`.
 
 ## When the country is wrong
 
 Wrong prices, catalog, or language; or the page says not available in your region, this content is not available in your country, we don’t ship to your location, or other geo-restriction. Country only — not city. Not a human VPN. Not streaming or live video.
 
-1. Copy the address-bar URL.
+1. Keep the target page open if you have one. You do not need its URL for setup.
 2. First time, or `aimed` is false → **First install** (`aluvia setup`). Pass `--url <page>` only if you have the address-bar URL.
 3. `aluvia geos` for the country list.
 4. `aluvia proxy-on --geo US` (or another country from that list), then reload.
@@ -26,25 +26,25 @@ Wrong prices, catalog, or language; or the page says not available in your regio
 
 Cloudflare, CAPTCHA, Access Denied, unusual traffic, or a hard 403 on a page that should load. Not a normal login wall. A residential IP in the right country sometimes clears the block. Fingerprint, TLS, and canvas stay the same.
 
-1. Copy the address-bar URL.
+1. Keep the target page open if you have one. You do not need its URL for setup.
 2. `aluvia status` if you already ran setup on this machine. Follow `next`. `what` explains every field.
 3. `{"code":"payment_required"}` always includes `claim_url` and `next` → show the human `claim_url`. Then `aluvia auth login` to wait. **Paid** below.
-4. First time, or `aimed` is false → **First install** (`aluvia setup --url <https-page>`). Pass the address-bar URL. `--url` is required unless Chrome is already aimed.
+4. First time, or `aimed` is false → **First install** (`npx aluvia-cli setup`). No page URL is required.
 
 ## First install (once per machine)
 
 ```bash
-npx aluvia-cli setup --url <https-page>
+npx aluvia-cli setup
 ```
 
-`--url <page>` is required when Chrome is not already aimed, so the restart opens a real HTTPS page that CONNECTs. Do not omit it. Do not invent a URL.
+Run this on the machine where the agent's browser runs. `--url <page>` is optional. Without it, setup opens `https://example.com/`, a small HTTPS test page, after the restart. If you supply a page URL, Chrome opens that page instead. Setup enables proxy traffic and checks the connection. No account or page URL is needed to start the free trial.
 
 Read the JSON. **`next` is the next action.**
 
 One restart is expected. `setup` tries to quit this Chrome and relaunch it with proxy flags. If you launch Chrome without quitting first, the flags are ignored.
 
-- `ready: true` → a real CONNECT landed. Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed is a no-op.
-- `needsChromeRestart: true` → run `chromeCommand` **exactly** (it quits first, then launches). Then run `aluvia setup` again.
+- `ready: true` → the browser reached the local proxy and the upstream connection check passed. Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed is a no-op.
+- `needsChromeRestart: true` → run `chromeCommand` **exactly** (it quits first, then launches). Then run `npx aluvia-cli setup` again.
 
 If still not aimed after that, run `aluvia setup` again. Follow `next`.
 

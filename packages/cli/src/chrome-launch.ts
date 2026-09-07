@@ -1,6 +1,9 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { DEFAULT_SETUP_URL } from './setup-page.js';
+import { readRunningChrome, retainedChromeArgs } from './chrome-process.js';
+import { closeChromeGracefully } from './chrome-close.js';
 
 const CANDIDATE_NAMES = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
 
@@ -88,9 +91,18 @@ function quoteWindowsArg(value: string): string {
   return value;
 }
 
-export function chromeLaunchArgs(dataPort: number, restoreUrl?: string | null): string[] {
-  const args = [`--proxy-server=http://127.0.0.1:${dataPort}`, '--disable-quic', '--restore-last-session'];
-  if (restoreUrl) args.push(restoreUrl);
+export function chromeLaunchArgs(
+  dataPort: number,
+  restoreUrl?: string | null,
+  existingArgs: string[] = [],
+): string[] {
+  const args = [
+    ...retainedChromeArgs(existingArgs),
+    `--proxy-server=http://127.0.0.1:${dataPort}`,
+    '--disable-quic',
+    '--restore-last-session',
+  ];
+  args.push(restoreUrl ?? DEFAULT_SETUP_URL);
   return args;
 }
 
@@ -109,10 +121,13 @@ export function chromeRestartCommand(dataPort: number, restoreUrl?: string | nul
     return `${quit} & timeout /T 1 /NOBREAK >NUL & start "" ${launch}`;
   }
 
-  const quit = CHROME_PROCESS_NAMES.map((name) => `pkill -x ${name}`).join('; ');
+  const running = process.platform === 'linux' ? readRunningChrome('/proc', process.env.ALUVIA_CHROME) : null;
+  const quit = running
+    ? `kill -TERM ${running.pid}`
+    : CHROME_PROCESS_NAMES.map((name) => `pkill -x ${name}`).join('; ');
   const launch = [
-    quoteShellArg(detectChromeBinary()),
-    ...chromeLaunchArgs(dataPort, restoreUrl).map(quoteShellArg),
+    quoteShellArg(running?.binary ?? detectChromeBinary()),
+    ...chromeLaunchArgs(dataPort, restoreUrl, running?.args).map(quoteShellArg),
   ].join(' ');
   return `${quit}; sleep 1; ${launch}`;
 }
@@ -121,7 +136,15 @@ export function skipChromeRestart(): boolean {
   return (process.env.ALUVIA_SKIP_CHROME_RESTART ?? '').trim().length > 0;
 }
 
-export function quitExistingChrome(): void {
+export function quitExistingChrome(pid?: number): void {
+  if (pid != null) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // The discovered browser may already have exited.
+    }
+    return;
+  }
   if (isWindows()) {
     // /T kills any child processes (helpers, renderers). Suppress stderr so
     // "process not found" doesn't produce noise.
@@ -146,7 +169,9 @@ export async function tryRestartChrome(
 ): Promise<{ launched: boolean }> {
   if (skipChromeRestart()) return { launched: false };
 
-  quitExistingChrome();
+  const running = process.platform === 'linux' ? readRunningChrome('/proc', process.env.ALUVIA_CHROME) : null;
+  const closed = running ? await closeChromeGracefully(running) : false;
+  if (!closed) quitExistingChrome(running?.pid);
   if (isWindows()) {
     // Give the OS a moment to release the profile lock. spawnSync sleep 1s
     // is fine on Windows too if we shell out, but Node's setTimeout is
@@ -156,8 +181,8 @@ export async function tryRestartChrome(
     spawnSync('sleep', ['1']);
   }
 
-  const bin = detectChromeBinary();
-  const args = chromeLaunchArgs(dataPort, restoreUrl);
+  const bin = running?.binary ?? detectChromeBinary();
+  const args = chromeLaunchArgs(dataPort, restoreUrl, running?.args);
   return await new Promise((resolve) => {
     let settled = false;
     const done = (launched: boolean) => {

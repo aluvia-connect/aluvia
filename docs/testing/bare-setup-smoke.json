@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "node": "v22.23.2",
+  "platform": "linux",
+  "browser": "real Chromium on Xvfb",
+  "network": "local API and TLS gateway fixtures",
+  "installMs": 1015,
+  "setupMs": 1944,
+  "repeatSetupMs": 310,
+  "ready": true,
+  "profilePreserved": true,
+  "cookiePreserved": true,
+  "originalTabRestored": true,
+  "browserControlReconnected": true,
+  "browserPageLoadedThroughProxy": true,
+  "repeatKeptBrowserAndSession": true,
+  "noApiKey": true,
+  "startsBrowserWhenNoneIsOpen": true,
+  "note": "Fixture timings do not validate a production setup speed claim."
+}
