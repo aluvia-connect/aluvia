@@ -43,7 +43,8 @@ describe('proxy skill install', () => {
     assert.ok(body.includes('aluvia proxy-on'));
     assert.ok(body.includes('npx aluvia-cli setup'));
     assert.ok(body.includes('chromeCommand'));
-    assert.ok(body.includes('no-op'));
+    assert.ok(body.includes('enables proxy traffic and checks the connection again'));
+    assert.ok(!body.includes('is a no-op'));
     assert.ok(body.includes('Idle is fine') || body.includes('Idle tabs stay aimed'));
     assert.ok(body.includes('One restart is expected'));
     assert.ok(body.includes('without quitting'));

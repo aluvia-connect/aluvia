@@ -91,6 +91,20 @@ Each drain makes at most one binding request and one request per pending event, 
 
 MIT
 
+### Website visit reference
+
+A setup command copied from Aluvia can include `--ref <visit-token>`:
+
+```sh
+npx aluvia-cli setup --ref <visit-token>
+```
+
+This optional reference connects the visit to the trial for ad measurement.
+It does not grant account access or contain Meta click IDs. Use the reference
+as shown, or run plain `npx aluvia-cli setup`. The first accepted reference
+remains linked to that installation. `--ref=value` is also accepted; the flag
+takes precedence over the legacy `ALUVIA_ATTRIBUTION_TOKEN` environment variable.
+
 ## Older SDK and MCP instructions
 
 The current Aluvia product is this local CLI. Older `@aluvia/sdk`, `@aluvia/mcp` and `aluvia-sdk` instructions describe a different integration. The CLI is not a drop-in replacement for those APIs. See the [current quickstart](https://aluvia.io/docs) and [migration guide](https://aluvia.io/legacy) before changing a working integration.

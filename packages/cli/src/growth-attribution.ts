@@ -13,6 +13,18 @@ const REQUEST_TIMEOUT_MS = 750;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EVENT_NAMES = ['setup_ready', 'first_proxy_request'] as const;
+/** A visit reference is attribution only, never an account credential. */
+export function setupAttributionReference(args: string[]): string | undefined {
+  const values: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--ref') values.push(args[++i] ?? '');
+    else if (args[i].startsWith('--ref=')) values.push(args[i].slice(6));
+  }
+  if (values.length > 1 || (values.length === 1 && !TOKEN.test(values[0]))) {
+    throw new Error('Invalid --ref. Copy the setup command again, or run it without --ref.');
+  }
+  return values[0];
+}
 type EventName = (typeof EVENT_NAMES)[number];
 type Event = {
   schema_version: 1;

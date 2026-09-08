@@ -39,7 +39,7 @@ describe('proxy help', () => {
     const start = help.commands.find((c) => c.command === 'start');
     assert.deepStrictEqual(
       setup?.options.map((o) => (o as { flag?: string }).flag),
-      ['--url <url>'],
+      ['--ref <visit-token>', '--url <url>'],
     );
     const urlOpt = setup?.options.find((o) => (o as { flag?: string }).flag === '--url <url>') as
       | { description?: string }
