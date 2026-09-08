@@ -38,6 +38,11 @@ export function buildHelpJson(): {
         description: 'Start the daemon and aim the GUI browser',
         options: [
           {
+            flag: '--ref <visit-token>',
+            description:
+              'Optional website visit reference for ad measurement. Does not grant account access.',
+          },
+          {
             flag: '--url <url>',
             description:
               'Optional. Open this page after the Chrome restart. Without it, setup opens https://example.com/ to check the browser connection.',

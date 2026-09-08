@@ -90,3 +90,17 @@ Each drain makes at most one binding request and one request per pending event, 
 ## License
 
 MIT
+
+### Website visit reference
+
+A setup command copied from Aluvia can include `--ref <visit-token>`:
+
+```sh
+npx aluvia-cli setup --ref <visit-token>
+```
+
+This optional reference connects the visit to the trial for ad measurement.
+It does not grant account access or contain Meta click IDs. Use the reference
+as shown, or run plain `npx aluvia-cli setup`. The first accepted reference
+remains linked to that installation. `--ref=value` is also accepted; the flag
+takes precedence over the legacy `ALUVIA_ATTRIBUTION_TOKEN` environment variable.

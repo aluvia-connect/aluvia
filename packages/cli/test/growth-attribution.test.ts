@@ -349,3 +349,28 @@ test('concurrent processes publish one original event; restart after lost ack re
   assert.deepEqual(await run('recovered'), [reports[0]]);
   assert.deepEqual(await run('recovered'), []);
 });
+
+test('setup --ref supports a normal CLI flag and never echoes malformed input', async () => {
+  const g = await bridge();
+  assert.equal(g.setupAttributionReference(['--ref', token]), token);
+  assert.equal(g.setupAttributionReference([`--ref=${token}`]), token);
+  assert.equal(g.setupAttributionReference(['--url', 'https://example.com/']), undefined);
+  for (const args of [['--ref'], ['--ref', 'private-value'], ['--ref', token, '--ref', token]]) {
+    assert.throws(
+      () => g.setupAttributionReference(args),
+      (error: Error) => error.message.includes('Invalid --ref') && !error.message.includes('private-value'),
+    );
+  }
+});
+
+test('setup --ref is captured before setup work and overrides the legacy environment', async () => {
+  process.env.ALUVIA_ATTRIBUTION_TOKEN = 'B'.repeat(43);
+  const { handleProxy } = await import('../src/proxy.js');
+  await captureOutput(() => handleProxy(['setup', '--ref', token, '--url', 'file:///invalid']));
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(home, 'growth-attribution', 'token.json'), 'utf8'))
+      .attribution_token,
+    token,
+  );
+  assert.equal(getStoredInstallId(), undefined);
+});

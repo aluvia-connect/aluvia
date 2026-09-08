@@ -27,7 +27,12 @@ import {
   writeChromeProxyPolicy,
 } from './proxy-attach.js';
 import { bothPortsAccept, controlRequest, isControlClientError } from './proxy-control-client.js';
-import { captureAttributionToken, drainAttribution, reportSetupReady } from './growth-attribution.js';
+import {
+  captureAttributionToken,
+  drainAttribution,
+  reportSetupReady,
+  setupAttributionReference,
+} from './growth-attribution.js';
 import { DEFAULT_PROBE_URLS, probeTargetUrls } from './session-probe-hosts.js';
 import { installProxySkill } from './proxy-skill.js';
 import { DEFAULT_SETUP_URL } from './setup-page.js';
@@ -1022,7 +1027,17 @@ async function postEgress(on: boolean): Promise<{ egress: ProxyEgress; rules: st
 }
 
 async function handleSetup(args: string[]): Promise<void> {
-  captureAttributionToken();
+  try {
+    captureAttributionToken(setupAttributionReference(args));
+  } catch {
+    output(
+      {
+        error: 'Invalid --ref. Copy the setup command again, or run it without --ref.',
+        next: 'Run `npx aluvia-cli setup`.',
+      },
+      1,
+    );
+  }
   // Reject an explicitly invalid URL before installing or starting anything.
   parseRestoreUrl(args);
   const skill = installProxySkill();
