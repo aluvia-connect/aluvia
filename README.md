@@ -77,7 +77,7 @@ Read the JSON. **`next` is the next action.**
 
 One restart is expected. `setup` tries to do it. If it cannot, run `chromeCommand`, then `aluvia setup` again. Do not launch a second Chrome.
 
-Re-running setup while aimed keeps the same browser and live session, and checks the connection again.
+Re-running setup while aimed enables proxy traffic, keeps the same working browser and live session, and checks the connection again.
 
 Idle is fine. If the page is still blocked after Chrome is aimed, reload the tab, then `aluvia status`. If that status says `aimed` is false, run setup again. If `aimed` is true but `ready` is false, follow `next` — do not assume the website is down.
 
@@ -256,3 +256,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md).
 ## License
 
 MIT — see [LICENSE](./LICENSE)
+
+## Older SDK and MCP instructions
+
+The current Aluvia product is this local CLI. Older `@aluvia/sdk`, `@aluvia/mcp` and `aluvia-sdk` instructions describe a different integration. The CLI is not a drop-in replacement for those APIs. See the [current quickstart](https://aluvia.io/docs) and [migration guide](https://aluvia.io/legacy) before changing a working integration.

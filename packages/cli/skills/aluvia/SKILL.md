@@ -43,7 +43,7 @@ Read the JSON. **`next` is the next action.**
 
 One restart is expected. `setup` tries to quit this Chrome and relaunch it with proxy flags. If you launch Chrome without quitting first, the flags are ignored.
 
-- `ready: true` → the browser reached the local proxy and the upstream connection check passed. Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed is a no-op.
+- `ready: true` → the browser reached the local proxy and the upstream connection check passed. Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed enables proxy traffic and checks the connection again. It keeps a working browser and live session; follow `next` if recovery is needed.
 - `needsChromeRestart: true` → run `chromeCommand` **exactly** (it quits first, then launches). Then run `npx aluvia-cli setup` again.
 
 If still not aimed after that, run `aluvia setup` again. Follow `next`.
