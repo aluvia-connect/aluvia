@@ -38,6 +38,7 @@ Live pages: [https://aluvia.io/geo](https://aluvia.io/geo)
 - [https://aluvia.io/geo/claude](https://aluvia.io/geo/claude)
 - [https://aluvia.io/geo/openclaw](https://aluvia.io/geo/openclaw)
 - [https://aluvia.io/geo/hermes](https://aluvia.io/geo/hermes)
+- [https://aluvia.io/geo/muse](https://aluvia.io/geo/muse)
 - [https://aluvia.io/geo/without-a-vpn](https://aluvia.io/geo/without-a-vpn)
 
 ---
