@@ -1,5 +1,5 @@
-/** A small HTTPS page with no account, target URL, or website deployment required. */
-export const DEFAULT_SETUP_URL = 'https://example.com/';
+/** HTTPS echo page so a bare setup tab shows the proxied exit IP. */
+export const DEFAULT_SETUP_URL = 'https://api.ipify.org/';
 
 /** Automatic browser setup is not evidence of a customer's first proxy request. */
 export function isSetupPageHostname(hostname: string): boolean {

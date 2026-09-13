@@ -15,7 +15,9 @@ import { attachWaitMs, attachWaitOverrideMs, DEFAULT_ATTACH_WAIT_MS } from '../s
 describe('chrome launch command', () => {
   test('quits Chrome first, then launches with proxy flags and the page URL', { skip: isWindows() }, () => {
     const prev = process.env.ALUVIA_CHROME;
-    process.env.ALUVIA_CHROME = '/opt/google/chrome/chrome';
+    const fakeChrome = path.join(os.tmpdir(), `aluvia-fake-chrome-${process.pid}`);
+    fs.writeFileSync(fakeChrome, '');
+    process.env.ALUVIA_CHROME = fakeChrome;
     try {
       const cmd = chromeRestartCommand(18787, 'https://example.com');
       assert.match(cmd, /^pkill -x google-chrome;/);
@@ -25,10 +27,12 @@ describe('chrome launch command', () => {
       assert.ok(cmd.includes('--disable-quic'));
       assert.ok(cmd.includes('--restore-last-session'));
       assert.ok(cmd.includes('https://example.com'));
+      assert.ok(cmd.includes(fakeChrome));
       const quitAt = cmd.indexOf('pkill');
       const launchAt = cmd.indexOf('--proxy-server=');
       assert.ok(quitAt >= 0 && launchAt > quitAt);
     } finally {
+      fs.rmSync(fakeChrome, { force: true });
       if (prev === undefined) delete process.env.ALUVIA_CHROME;
       else process.env.ALUVIA_CHROME = prev;
     }

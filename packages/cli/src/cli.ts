@@ -45,7 +45,7 @@ export function buildHelpJson(): {
           {
             flag: '--url <url>',
             description:
-              'Optional. Open this page after the Chrome restart. Without it, setup opens https://example.com/ to check the browser connection.',
+              'Optional. Open this page after the Chrome restart. Without it, setup opens https://api.ipify.org/ so the tab shows the proxied exit IP.',
           },
         ],
       },

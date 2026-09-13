@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import path from 'node:path';
 import tls from 'node:tls';
@@ -162,10 +163,13 @@ function savedDaemonArgs(existing: ProxyJson, args: string[] = []): string[] {
   ];
 }
 
-const DATACENTER_IP = '104.30.175.37';
 const UPSTREAM_UNAVAILABLE_ERROR = 'Upstream gateway returned 503 (590 UPSTREAM503).';
 const UPSTREAM_UNAVAILABLE_CODE = 'upstream_unavailable';
 const UPSTREAM_UNAVAILABLE_NEXT = 'Run `aluvia rotate-ip` then reload the tab.';
+const SAME_AS_DIRECT_NEXT =
+  "Chrome is aimed, but the proxied exit IP matches this VM's direct IP. Traffic is not leaving through Aluvia. Run `aluvia proxy-on` then reload the tab, or run `aluvia rotate-ip` then reload.";
+const MISSING_EXIT_IP_NEXT =
+  'Could not read the proxied exit IP through the local proxy. Reload the tab, or run `aluvia rotate-ip` then reload.';
 
 export type TunnelProbe = {
   ok: boolean;
@@ -174,9 +178,41 @@ export type TunnelProbe = {
   upstreamUnavailable: boolean;
 };
 
-function datacenterIp(): string {
+export type ExitProbeFields = {
+  directIp: string | null;
+  exitIp: string | null;
+  sameAsDirect: boolean;
+};
+
+/** Lab-only override. Must not be the product ready rule. */
+function labDirectIpOverride(): string | null {
   const raw = (process.env.ALUVIA_DATACENTER_IP ?? '').trim();
-  return raw || DATACENTER_IP;
+  return raw || null;
+}
+
+export function compareExitToDirect(exitIp: string | null, directIp: string | null): ExitProbeFields {
+  return {
+    exitIp,
+    directIp,
+    sameAsDirect: exitIp != null && directIp != null && exitIp === directIp,
+  };
+}
+
+/** ready means aimed + healthy + live + exitIp present + exitIp !== directIp. */
+export function productReady(opts: {
+  aimed: boolean;
+  healthy: boolean;
+  live: boolean;
+  exitIp: string | null;
+  directIp: string | null;
+}): boolean {
+  return opts.aimed && opts.healthy && opts.live && opts.exitIp != null && opts.exitIp !== opts.directIp;
+}
+
+function exitProbeNext(fields: ExitProbeFields): string | null {
+  if (fields.sameAsDirect) return SAME_AS_DIRECT_NEXT;
+  if (fields.exitIp == null) return MISSING_EXIT_IP_NEXT;
+  return null;
 }
 
 function probeTargetUrl(): string {
@@ -209,7 +245,81 @@ function requestPath(parsed: URL): string {
 
 const PROBE_TIMEOUT_MS = 5_000;
 
-/** HTTPS CONNECT through the local proxy. ready requires CONNECT 200 and a non-datacenter egress IP. */
+function fetchEchoIpDirect(targetUrl: string): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(targetUrl.trim());
+  } catch {
+    return Promise.resolve(null);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return Promise.resolve(null);
+  }
+
+  const isHttps = parsed.protocol === 'https:';
+  const lib = isHttps ? https : http;
+  const port = parsed.port ? Number(parsed.port) : isHttps ? 443 : 80;
+  const options: https.RequestOptions = {
+    hostname: parsed.hostname,
+    port,
+    method: 'GET',
+    path: requestPath(parsed),
+    headers: { Host: parsed.host, Connection: 'close' },
+    timeout: PROBE_TIMEOUT_MS,
+    agent: false,
+  };
+  if (isHttps) {
+    options.servername = net.isIP(parsed.hostname) ? undefined : parsed.hostname;
+    options.rejectUnauthorized = true;
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ip: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(ip);
+    };
+
+    const req = lib.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+        if (Buffer.concat(chunks).length > 65_536) {
+          req.destroy();
+          finish(extractIp(Buffer.concat(chunks).toString('utf8')));
+        }
+      });
+      res.on('end', () => {
+        finish(extractIp(Buffer.concat(chunks).toString('utf8')));
+      });
+      res.on('error', () => finish(null));
+    });
+    req.setTimeout(PROBE_TIMEOUT_MS, () => {
+      req.destroy();
+      finish(null);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      finish(null);
+    });
+    req.on('error', () => finish(null));
+    req.end();
+  });
+}
+
+/** Public IP of this process with no proxy. Never uses 127.0.0.1:18787. */
+export async function fetchDirectIp(): Promise<string | null> {
+  const override = labDirectIpOverride();
+  if (override) return override;
+  for (const url of probeTargetUrls()) {
+    const ip = await fetchEchoIpDirect(url);
+    if (ip) return ip;
+  }
+  return null;
+}
+
+/** HTTPS CONNECT through the local proxy, then GET the echo host. ok means CONNECT 200, GET 200, and a parsed IP. */
 export async function probeAluviaTunnel(dataPort: number, targetUrl?: string): Promise<TunnelProbe> {
   const target = (targetUrl ?? probeTargetUrl()).trim();
   let parsed: URL;
@@ -299,7 +409,7 @@ export async function probeAluviaTunnel(dataPort: number, targetUrl?: string): P
             return;
           }
           const ip = extractIp(body);
-          const ok = getStatus === 200 && ip != null && ip !== datacenterIp();
+          const ok = getStatus === 200 && ip != null;
           finish({ ok, status, ip, upstreamUnavailable: false });
         });
         stream.on('error', () => {
@@ -362,7 +472,7 @@ export async function probeSessionOnce(dataPort: number): Promise<TunnelProbe> {
 
 /**
  * Retry the same session on 503/590 (1–3s gaps). Do not rotate here.
- * A datacenter IP is a live session, not a flake — stop retrying.
+ * An echo IP is a live session, not a flake — stop retrying.
  */
 export async function probeUntilReady(dataPort: number): Promise<TunnelProbe> {
   const attempts = probeRetryAttempts();
@@ -378,7 +488,7 @@ export async function probeUntilReady(dataPort: number): Promise<TunnelProbe> {
   return last;
 }
 
-/** Dead exit: 590/503/upstream_unavailable, or no IP. A datacenter IP is live but not ready. */
+/** Dead exit: 590/503/upstream_unavailable, or no IP. A same-as-direct IP is live but not ready. */
 function isDeadSessionProbe(probe: TunnelProbe): boolean {
   if (probe.ok) return false;
   return probe.upstreamUnavailable || probe.ip == null;
@@ -416,15 +526,8 @@ function rotateProbeFailure(probe: TunnelProbe): { error: string; code: string; 
       next: UPSTREAM_UNAVAILABLE_NEXT,
     };
   }
-  if (probe.ip != null) {
-    return {
-      error: `Upstream gateway returned datacenter IP ${probe.ip}.`,
-      code: UPSTREAM_UNAVAILABLE_CODE,
-      next: UPSTREAM_UNAVAILABLE_NEXT,
-    };
-  }
   return {
-    error: 'Upstream gateway did not return a non-datacenter IP.',
+    error: 'Upstream gateway did not return an exit IP.',
     code: UPSTREAM_UNAVAILABLE_CODE,
     next: UPSTREAM_UNAVAILABLE_NEXT,
   };
@@ -449,7 +552,10 @@ const STATUS_WHAT = {
     'Has Chrome CONNECTed to the local proxy? Idle tabs stay aimed. After next asks you to reload, the following status/setup checks for a CONNECT since that ask.',
   egress: 'aluvia = mobile/residential IP. direct = this VM datacenter IP.',
   ready:
-    'Aluvia tunnel CONNECT returned 200 and the egress IP is not this VM datacenter IP. Distinct from aimed.',
+    "Chrome is aimed, the daemon is healthy, and the proxied exit IP differs from this VM's direct IP. Distinct from aimed.",
+  directIp: "This VM's public IP, fetched without the local proxy.",
+  exitIp: 'Public IP seen through the local proxy (CONNECT via 127.0.0.1:dataPort).',
+  sameAsDirect: 'true means the proxied IP matches this VM. ready is false.',
   healthy: 'The local proxy process is accepting connections.',
   needsChromeRestart: 'true means run chromeCommand (quit then launch). Then run aluvia setup again.',
   rules: '["*"] = all hosts through Aluvia. [] = all hosts direct.',
@@ -462,6 +568,7 @@ function statusNext(opts: {
   aimed: boolean;
   egress: ProxyEgress;
   dataPort: number;
+  exit?: ExitProbeFields | null;
 }): { next: string; chromeCommand?: string } {
   if (!opts.live) {
     if (opts.aimed) {
@@ -490,6 +597,8 @@ function statusNext(opts: {
       next: 'Chrome is aimed. Traffic is using the datacenter IP. Run `aluvia proxy-on` then reload the tab.',
     };
   }
+  const exitNext = opts.exit ? exitProbeNext(opts.exit) : null;
+  if (exitNext) return { next: exitNext };
   return {
     next: 'Chrome is aimed and traffic is going through Aluvia. Reload the tab. If still blocked, run `aluvia rotate-ip` then reload.',
   };
@@ -498,21 +607,29 @@ function statusNext(opts: {
 function statusFields(
   state: ProxyJson,
   healthy: boolean,
-  extra?: Record<string, unknown> & { probe?: TunnelProbe },
+  extra?: Record<string, unknown> & { probe?: TunnelProbe; directIp?: string | null },
 ) {
   const egress = egressFromRules(state.rules);
   const aimed = aimedFrom(state);
   const live = isLive(state);
   const probe = extra?.probe;
-  const probeOk = probe?.ok === true;
+  const comparison = probe !== undefined ? compareExitToDirect(probe.ip, extra?.directIp ?? null) : null;
+  const ready = productReady({
+    aimed,
+    healthy,
+    live,
+    exitIp: comparison?.exitIp ?? null,
+    directIp: comparison?.directIp ?? null,
+  });
   const guide = statusNext({
     live,
     healthy,
     aimed,
     egress,
     dataPort: state.dataPort,
+    exit: comparison,
   });
-  const { probe: _probe, ...rest } = extra ?? {};
+  const { probe: _probe, directIp: _directIp, ...rest } = extra ?? {};
   return {
     next: probe?.upstreamUnavailable ? UPSTREAM_UNAVAILABLE_NEXT : guide.next,
     pid: state.pid,
@@ -527,10 +644,17 @@ function statusFields(
     attach: state.attach,
     egress,
     aimed,
-    ready: aimed && healthy && live && probeOk,
+    ready,
     needsChromeRestart: !aimed,
     what: STATUS_WHAT,
     ...(guide.chromeCommand ? { chromeCommand: guide.chromeCommand } : {}),
+    ...(comparison
+      ? {
+          directIp: comparison.directIp,
+          exitIp: comparison.exitIp,
+          sameAsDirect: comparison.sameAsDirect,
+        }
+      : {}),
     ...(probe?.upstreamUnavailable ? upstreamUnavailablePayload() : {}),
     ...rest,
   };
@@ -1069,20 +1193,27 @@ async function handleSetup(args: string[]): Promise<void> {
   // 5. rotate-ip remains the explicit new-exit command. Do not rotate to heal first setup.
   // Skip the session probe until Chrome is aimed. ready requires aimed, and a long
   // probe would sit silent after setup already knows the next action is chromeCommand.
-  const probe =
-    aimed && state && healthy
-      ? await ensureSetupSession({
-          dataPort: state.dataPort,
-          sessionId,
-          hadPriorSession: Boolean(priorSessionId),
-          byo: resolveCredential().kind === 'byo',
-        })
-      : {
-          ok: false,
-          status: null,
-          ip: null,
-          upstreamUnavailable: false,
-        };
+  const probed = Boolean(aimed && state && healthy);
+  const [probe, directIp] =
+    probed && state
+      ? await Promise.all([
+          ensureSetupSession({
+            dataPort: state.dataPort,
+            sessionId,
+            hadPriorSession: Boolean(priorSessionId),
+            byo: resolveCredential().kind === 'byo',
+          }),
+          fetchDirectIp(),
+        ])
+      : [
+          {
+            ok: false,
+            status: null,
+            ip: null,
+            upstreamUnavailable: false,
+          } satisfies TunnelProbe,
+          null,
+        ];
   if (state && healthy) {
     try {
       const { json } = await controlRequest('GET', '/status');
@@ -1091,21 +1222,30 @@ async function handleSetup(args: string[]): Promise<void> {
       failControl(err);
     }
   }
-  const ready = aimed && healthy && probe.ok;
+  const live = Boolean(state && isLive(state));
+  const comparison = compareExitToDirect(probe.ip, probed ? directIp : null);
+  const ready = productReady({
+    aimed,
+    healthy,
+    live,
+    exitIp: probed ? comparison.exitIp : null,
+    directIp: probed ? comparison.directIp : null,
+  });
   void reportSetupReady({
     aimed,
     healthy,
-    probeOk: probe.ok,
+    probeOk: ready,
     credentialKind: statusJson.credentialKind === 'aluvia' ? 'aluvia' : 'byo',
     connectionId: typeof statusJson.connectionId === 'number' ? statusJson.connectionId : undefined,
   });
   const skillPath = skill.skillPaths[0] ?? null;
   // A skipped probe (Chrome not aimed) is not a dead session — next is chromeCommand.
   const unavailable = aimed && isDeadSessionProbe(probe);
+  const probeNext = !unavailable && aimed ? exitProbeNext(comparison) : null;
   // A successful setup already verified the browser. Advice to reload a target
   // page must not invalidate that evidence or force another restart on rerun.
   return output({
-    next: unavailable ? UPSTREAM_UNAVAILABLE_NEXT : setupNext(ready),
+    next: unavailable ? UPSTREAM_UNAVAILABLE_NEXT : (probeNext ?? setupNext(ready)),
     skillPath,
     ...statusJson,
     healthy,
@@ -1117,6 +1257,13 @@ async function handleSetup(args: string[]): Promise<void> {
     ...(skill.error ? { skillError: skill.error } : {}),
     ...(binPath ? { binPath } : {}),
     ...attachPublicFields(result),
+    ...(probed
+      ? {
+          directIp: comparison.directIp,
+          exitIp: comparison.exitIp,
+          sameAsDirect: comparison.sameAsDirect,
+        }
+      : {}),
     ...(unavailable ? upstreamUnavailablePayload() : {}),
   });
 }
@@ -1208,16 +1355,26 @@ async function handleStatus(): Promise<void> {
     }
     const aimedState = base && probe ? { ...base, attach: probe.attach, lastConnect } : base;
     const aimedNow = aimedState ? aimedFrom(aimedState) : false;
-    const tunnelProbe =
-      aimedNow &&
+    const shouldProbe =
+      Boolean(aimedNow) &&
       healthy &&
       egressFromRules(aimedState?.rules ?? state?.rules ?? []) === 'aluvia' &&
-      aimedState
-        ? await probeUntilReady(aimedState.dataPort)
-        : undefined;
+      aimedState != null;
+    const [tunnelProbe, directIp] =
+      shouldProbe && aimedState
+        ? await Promise.all([probeUntilReady(aimedState.dataPort), fetchDirectIp()])
+        : [undefined, undefined];
     return outputMaybeStamp(
       aimedState
-        ? { ...statusFields(aimedState, healthy, { probe: tunnelProbe }), ...json, healthy }
+        ? {
+            ...statusFields(
+              aimedState,
+              healthy,
+              tunnelProbe !== undefined ? { probe: tunnelProbe, directIp: directIp ?? null } : undefined,
+            ),
+            ...json,
+            healthy,
+          }
         : { ...json, healthy },
     );
   } catch (err) {
@@ -1421,15 +1578,20 @@ async function handleRotateIp(args: string[]): Promise<void> {
   const rotated = await postRotate();
   const after = await readControlStatus();
   const state = readProxyJson();
-  const probe = state
-    ? await probeUntilReady(state.dataPort)
-    : {
-        ok: false,
-        status: null,
-        ip: null,
-        upstreamUnavailable: false,
-      };
-  if (!probe.ok) {
+  const [probe, directIp] = await Promise.all([
+    state
+      ? probeUntilReady(state.dataPort)
+      : Promise.resolve({
+          ok: false,
+          status: null,
+          ip: null,
+          upstreamUnavailable: false,
+        } satisfies TunnelProbe),
+    fetchDirectIp(),
+  ]);
+  const comparison = compareExitToDirect(probe.ip, directIp);
+  const ready = comparison.exitIp != null && comparison.exitIp !== comparison.directIp;
+  if (isDeadSessionProbe(probe)) {
     return outputMaybeStamp({
       sessionId: rotated.sessionId,
       connectionId: rotated.connectionId,
@@ -1437,7 +1599,20 @@ async function handleRotateIp(args: string[]): Promise<void> {
       egress: 'aluvia',
       rotated: false,
       ready: false,
+      ...comparison,
       ...rotateProbeFailure(probe),
+    });
+  }
+  if (!ready) {
+    return outputMaybeStamp({
+      sessionId: rotated.sessionId,
+      connectionId: rotated.connectionId,
+      targetGeo: after.targetGeo,
+      egress: 'aluvia',
+      rotated: true,
+      ready: false,
+      ...comparison,
+      next: exitProbeNext(comparison) ?? MISSING_EXIT_IP_NEXT,
     });
   }
   return outputMaybeStamp({
@@ -1447,6 +1622,7 @@ async function handleRotateIp(args: string[]): Promise<void> {
     egress: 'aluvia',
     rotated: true,
     ready: true,
+    ...comparison,
     next: 'Reload the tab. Do not restart Chrome.',
   });
 }

@@ -2,7 +2,15 @@ import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
 import tls from 'node:tls';
-import { DEFAULT_PROBE_URLS, probeAluviaTunnel, probeUntilReady } from '../src/proxy.js';
+import {
+  DEFAULT_PROBE_URLS,
+  compareExitToDirect,
+  fetchDirectIp,
+  probeAluviaTunnel,
+  probeUntilReady,
+  productReady,
+} from '../src/proxy.js';
+import { DEFAULT_SETUP_URL, isSetupPageHostname } from '../src/setup-page.js';
 import { MOCK_EGRESS_IP, MOCK_TLS } from './helpers/mock-gateway.js';
 
 const ENV_KEYS = [
@@ -116,12 +124,12 @@ describe('probeAluviaTunnel', { concurrency: 1 }, () => {
     }
   });
 
-  test('ready is false when CONNECT 200 returns the datacenter IP', async () => {
+  test('CONNECT 200 keeps the parsed IP even when it matches a lab override', async () => {
     process.env.ALUVIA_DATACENTER_IP = '104.30.175.37';
     const proxy = await listenProxy({ ip: '104.30.175.37' });
     try {
       const result = await probeAluviaTunnel(proxy.port);
-      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.ok, true);
       assert.strictEqual(result.status, 200);
       assert.strictEqual(result.ip, '104.30.175.37');
       assert.strictEqual(result.upstreamUnavailable, false);
@@ -253,5 +261,159 @@ describe('probeAluviaTunnel', { concurrency: 1 }, () => {
     } finally {
       await proxy.close();
     }
+  });
+});
+
+describe('product ready compares exitIp to directIp', () => {
+  test('ready is true when exit differs from direct', () => {
+    const fields = compareExitToDirect('107.77.213.210', '203.0.113.1');
+    assert.strictEqual(fields.sameAsDirect, false);
+    assert.strictEqual(
+      productReady({
+        aimed: true,
+        healthy: true,
+        live: true,
+        exitIp: fields.exitIp,
+        directIp: fields.directIp,
+      }),
+      true,
+    );
+  });
+
+  test('ready is false when exit equals direct even if that IP is not the old datacenter constant', () => {
+    const fields = compareExitToDirect('8.8.8.8', '8.8.8.8');
+    assert.strictEqual(fields.sameAsDirect, true);
+    assert.strictEqual(
+      productReady({
+        aimed: true,
+        healthy: true,
+        live: true,
+        exitIp: fields.exitIp,
+        directIp: fields.directIp,
+      }),
+      false,
+    );
+  });
+
+  test('old hardcoded datacenter IP is not special when it differs from direct', () => {
+    const fields = compareExitToDirect('104.30.175.37', '203.0.113.1');
+    assert.strictEqual(fields.sameAsDirect, false);
+    assert.strictEqual(
+      productReady({
+        aimed: true,
+        healthy: true,
+        live: true,
+        exitIp: fields.exitIp,
+        directIp: fields.directIp,
+      }),
+      true,
+    );
+  });
+
+  test('missing exitIp is not ready', () => {
+    assert.strictEqual(
+      productReady({
+        aimed: true,
+        healthy: true,
+        live: true,
+        exitIp: null,
+        directIp: '203.0.113.1',
+      }),
+      false,
+    );
+    assert.strictEqual(compareExitToDirect(null, '203.0.113.1').sameAsDirect, false);
+  });
+});
+
+describe('fetchDirectIp', { concurrency: 1 }, () => {
+  const originalEnv = snapshotEnv();
+
+  afterEach(() => {
+    restoreEnv(originalEnv);
+  });
+
+  test('ALUVIA_DATACENTER_IP is a lab override and skips the echo fetch', async () => {
+    process.env.ALUVIA_DATACENTER_IP = '203.0.113.9';
+    delete process.env.ALUVIA_PROBE_URL;
+    assert.strictEqual(await fetchDirectIp(), '203.0.113.9');
+  });
+
+  test('fetches the echo list with no proxy and never CONNECTs to the local data port', async () => {
+    delete process.env.ALUVIA_DATACENTER_IP;
+    const proxyHits: string[] = [];
+    const proxy = http.createServer((_req, res) => {
+      proxyHits.push('GET');
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('9.9.9.9');
+    });
+    proxy.on('connect', (req, socket) => {
+      proxyHits.push(`CONNECT ${req.url ?? ''}`);
+      socket.write('HTTP/1.1 500 Fail\r\nConnection: close\r\n\r\n');
+      socket.end();
+    });
+    const echoHosts: string[] = [];
+    const echo = http.createServer((req, res) => {
+      echoHosts.push(`${req.method ?? 'GET'} ${req.headers.host ?? ''} ${req.url ?? ''}`);
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('198.51.100.20\n');
+    });
+    const proxyPort: number = await new Promise((resolve, reject) => {
+      proxy.listen(0, '127.0.0.1', () => {
+        const addr = proxy.address();
+        resolve(typeof addr === 'object' && addr ? addr.port : 0);
+      });
+      proxy.on('error', reject);
+    });
+    const echoPort: number = await new Promise((resolve, reject) => {
+      echo.listen(0, '127.0.0.1', () => {
+        const addr = echo.address();
+        resolve(typeof addr === 'object' && addr ? addr.port : 0);
+      });
+      echo.on('error', reject);
+    });
+    process.env.ALUVIA_PROBE_URL = `http://127.0.0.1:${echoPort}/`;
+    try {
+      const ip = await fetchDirectIp();
+      assert.strictEqual(ip, '198.51.100.20');
+      assert.deepStrictEqual(proxyHits, []);
+      assert.ok(echoHosts.some((line) => line.startsWith('GET 127.0.0.1')));
+      assert.notStrictEqual(echoPort, proxyPort);
+    } finally {
+      await new Promise<void>((resolve) => echo.close(() => resolve()));
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  });
+
+  test('parses a JSON echo body and returns null when the host is dead', async () => {
+    delete process.env.ALUVIA_DATACENTER_IP;
+    const echo = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ip: '203.0.113.40' }));
+    });
+    const echoPort: number = await new Promise((resolve, reject) => {
+      echo.listen(0, '127.0.0.1', () => {
+        const addr = echo.address();
+        resolve(typeof addr === 'object' && addr ? addr.port : 0);
+      });
+      echo.on('error', reject);
+    });
+    try {
+      process.env.ALUVIA_PROBE_URL = `http://127.0.0.1:${echoPort}/`;
+      assert.strictEqual(await fetchDirectIp(), '203.0.113.40');
+      process.env.ALUVIA_PROBE_URL = 'http://127.0.0.1:1/';
+      process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '1';
+      assert.strictEqual(await fetchDirectIp(), null);
+    } finally {
+      await new Promise<void>((resolve) => echo.close(() => resolve()));
+    }
+  });
+});
+
+describe('default setup page', () => {
+  test('bare setup opens ipify so the tab shows the exit IP', () => {
+    assert.strictEqual(DEFAULT_SETUP_URL, 'https://api.ipify.org/');
+    assert.strictEqual(isSetupPageHostname('api.ipify.org'), true);
+    assert.strictEqual(isSetupPageHostname('API.IPIFY.ORG.'), true);
+    assert.strictEqual(isSetupPageHostname('example.com'), false);
   });
 });
