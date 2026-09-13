@@ -37,13 +37,13 @@ Cloudflare, CAPTCHA, Access Denied, unusual traffic, or a hard 403 on a page tha
 npx aluvia-cli setup
 ```
 
-Run this on the machine where the agent's browser runs. `--url <page>` is optional. Without it, setup opens `https://example.com/`, a small HTTPS test page, after the restart. If you supply a page URL, Chrome opens that page instead. Setup enables proxy traffic and checks the connection. No account or page URL is needed to start the free trial.
+Run this on the machine where the agent's browser runs. `--url <page>` is optional. Without it, setup opens `https://api.ipify.org/`, which shows the proxied exit IP, after the restart. If you supply a page URL, Chrome opens that page instead. Setup enables proxy traffic and checks the connection. No account or page URL is needed to start the free trial.
 
 Read the JSON. **`next` is the next action.**
 
 One restart is expected. `setup` tries to quit this Chrome and relaunch it with proxy flags. If you launch Chrome without quitting first, the flags are ignored.
 
-- `ready: true` → the browser reached the local proxy and the upstream connection check passed. Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed enables proxy traffic and checks the connection again. It keeps a working browser and live session; follow `next` if recovery is needed.
+- `ready: true` → Chrome is aimed, the daemon is healthy, and the proxied exit IP differs from this VM's direct IP (`exitIp` vs `directIp`). Reload the blocked tab. Idle tabs stay aimed. Re-running setup while aimed enables proxy traffic and checks the connection again. It keeps a working browser and live session; follow `next` if recovery is needed.
 - `needsChromeRestart: true` → run `chromeCommand` **exactly** (it quits first, then launches). Then run `npx aluvia-cli setup` again.
 
 If still not aimed after that, run `aluvia setup` again. Follow `next`.

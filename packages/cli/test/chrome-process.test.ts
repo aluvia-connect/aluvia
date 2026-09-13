@@ -5,13 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromeDebugPort, readRunningChrome, retainedChromeArgs } from '../src/chrome-process.js';
 import { chromeLaunchArgs } from '../src/chrome-launch.js';
-import { DEFAULT_SETUP_URL } from '../src/setup-page.js';
+import { DEFAULT_SETUP_URL, isSetupPageHostname } from '../src/setup-page.js';
 
 test('bare launch opens the HTTPS test page and an explicit URL takes its place', () => {
   const args = chromeLaunchArgs(18787);
   assert.ok(args.includes('--proxy-server=http://127.0.0.1:18787'));
   assert.ok(args.includes('--restore-last-session'));
+  assert.equal(DEFAULT_SETUP_URL, 'https://api.ipify.org/');
   assert.equal(args.at(-1), DEFAULT_SETUP_URL);
+  assert.equal(isSetupPageHostname('api.ipify.org'), true);
+  assert.equal(isSetupPageHostname('example.com'), false);
   const explicit = chromeLaunchArgs(18787, 'https://shop.example/cart');
   assert.equal(explicit.at(-1), 'https://shop.example/cart');
   assert.ok(!explicit.includes(DEFAULT_SETUP_URL));

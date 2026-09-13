@@ -14,9 +14,9 @@ npx aluvia-cli setup
 
 Run the command on the machine where the agent's browser runs. Node.js 18+.
 
-No target page URL is required. Setup installs the command launcher and skill, starts the local proxy, and configures Chrome. Initial configuration can restart Chrome and opens `https://example.com/`, a small HTTPS test page. Use optional `--url <page>` to open a specific page instead.
+No target page URL is required. Setup installs the command launcher and skill, starts the local proxy, and configures Chrome. Initial configuration can restart Chrome and opens `https://api.ipify.org/`, which shows the proxied exit IP. Use optional `--url <page>` to open a specific page instead.
 
-Setup enables proxy traffic. `ready: true` requires the browser to reach the local proxy and the upstream connection check to pass. Rerunning setup enables proxy traffic again, checks the connection and keeps a working browser and session. If setup needs recovery, follow the JSON `next` field.
+Setup enables proxy traffic. `ready: true` requires Chrome aimed at the local proxy, a healthy daemon, and a proxied `exitIp` that differs from this VM's `directIp`. Rerunning setup enables proxy traffic again, checks the connection and keeps a working browser and session. If setup needs recovery, follow the JSON `next` field.
 
 To choose a country, run `aluvia geos`, then `aluvia proxy-on --geo US` (replace `US`), reload the target page, and run `aluvia status`. A working proxy does not guarantee access to every site.
 

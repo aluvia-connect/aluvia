@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createMockAluviaApi } from '../test/helpers/mock-aluvia-api.js';
 import { createMockGateway, MOCK_EGRESS_IP } from '../test/helpers/mock-gateway.js';
 import { readRunningChrome } from '../src/chrome-process.js';
+import { DEFAULT_SETUP_URL } from '../src/setup-page.js';
 
 assert.equal(process.platform, 'linux');
 assert.ok(fs.existsSync('/.dockerenv'), 'This smoke test restarts Chromium. Use a disposable container.');
@@ -29,6 +30,7 @@ const env = {
   ALUVIA_GATEWAY_HOST: '127.0.0.1',
   ALUVIA_GATEWAY_PORT: String(gateway.port),
   ALUVIA_PROBE_URL: `https://${MOCK_EGRESS_IP}/`,
+  ALUVIA_DATACENTER_IP: '203.0.113.1',
   ALUVIA_CHROME_POLICY_DIR: path.join(dir, 'unwritable-policy'),
   ALUVIA_PROBE_RETRY_DELAY_MS: '50',
   ALUVIA_PROBE_RETRY_ATTEMPTS: '2',
@@ -133,7 +135,7 @@ try {
   await cdp(tab.webSocketDebuggerUrl, 'Network.setCookie', {
     name: 'setup_smoke',
     value: 'preserved',
-    url: 'https://example.com/',
+    url: DEFAULT_SETUP_URL,
     expires: Date.now() / 1000 + 3600,
   });
   const first = await run('npx', ['aluvia-cli', 'setup']);
@@ -143,7 +145,7 @@ try {
   assert.equal(result.healthy, true);
   assert.equal(result.needsChromeRestart, false);
   assert.equal(result.aim, 'flags');
-  assert.equal(result.restoreUrl, 'https://example.com/');
+  assert.equal(result.restoreUrl, DEFAULT_SETUP_URL);
   assert.ok(result.binPath && fs.existsSync(result.binPath));
   const after = readRunningChrome()!;
   assert.ok(after && after.pid !== before.pid, 'Setup must restart the initial browser.');
@@ -155,10 +157,10 @@ try {
     reconnected.some((page) => page.url === `${api.url}/original-tab`),
     'The original tab must be restored.',
   );
-  const target = reconnected.find((page) => page.url === 'https://example.com/');
+  const target = reconnected.find((page) => page.url === DEFAULT_SETUP_URL);
   assert.ok(target, 'Default test page must be open in the configured browser.');
   const cookies = await cdp(target.webSocketDebuggerUrl, 'Network.getCookies', {
-    urls: ['https://example.com/'],
+    urls: [DEFAULT_SETUP_URL],
   });
   assert.ok(
     cookies.cookies.some((cookie: any) => cookie.name === 'setup_smoke' && cookie.value === 'preserved'),
@@ -208,8 +210,8 @@ try {
   const noBrowser = await run('npx', ['aluvia-cli', 'setup']);
   const fresh = JSON.parse(noBrowser.stdout);
   assert.equal(fresh.ready, true, JSON.stringify(fresh));
-  assert.equal(fresh.restoreUrl, 'https://example.com/');
-  assert.ok((await waitPages()).some((page) => page.url === 'https://example.com/'));
+  assert.equal(fresh.restoreUrl, DEFAULT_SETUP_URL);
+  assert.ok((await waitPages()).some((page) => page.url === DEFAULT_SETUP_URL));
   console.log(
     JSON.stringify(
       {

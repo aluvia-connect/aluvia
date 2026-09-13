@@ -24,6 +24,7 @@ const ENV_KEYS = [
   'ALUVIA_PROBE_URL',
   'ALUVIA_PROBE_RETRY_DELAY_MS',
   'ALUVIA_PROBE_RETRY_ATTEMPTS',
+  'ALUVIA_DATACENTER_IP',
 ] as const;
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -378,6 +379,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '1';
     process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '1';
     process.env.ALUVIA_PROBE_URL = 'https://127.0.0.1:1/';
+    process.env.ALUVIA_DATACENTER_IP = '203.0.113.1';
     writeProxyJson({
       pid: 999999992,
       ready: false,
@@ -412,6 +414,7 @@ describe('proxy lifecycle', { concurrency: 1 }, () => {
     process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '1';
     process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '1';
     process.env.ALUVIA_PROBE_URL = 'https://127.0.0.1:1/';
+    process.env.ALUVIA_DATACENTER_IP = '203.0.113.1';
     writeProxyJson({
       pid: 999999993,
       ready: false,

@@ -61,6 +61,9 @@ function setupArgsNoUrl(dataPort: number, controlPort: number): string[] {
   return ['setup', '--port', String(dataPort), '--control-port', String(controlPort)];
 }
 
+/** Lab override so tests do not fetch a public echo host. Distinct from MOCK_EGRESS_IP. */
+const LAB_DIRECT_IP = '203.0.113.1';
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -92,6 +95,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       process.env.ALUVIA_SKIP_CHROME_RESTART = '1';
       process.env.ALUVIA_CHROME_POLICY_DIR = path.join(home, 'chrome-policy');
       process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
+      process.env.ALUVIA_DATACENTER_IP = LAB_DIRECT_IP;
     });
 
     afterEach(async () => {
@@ -474,6 +478,9 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(result.data.status, 'verified');
       assert.strictEqual(result.data.healthy, true);
       assert.strictEqual(result.data.egress, 'aluvia');
+      assert.strictEqual(result.data.exitIp, MOCK_EGRESS_IP);
+      assert.strictEqual(result.data.directIp, LAB_DIRECT_IP);
+      assert.strictEqual(result.data.sameAsDirect, false);
       assert.strictEqual(result.data.needsChromeRestart, false);
       assert.strictEqual(result.data.chromeCommand, undefined);
       assert.ok(Array.isArray(result.data.skillPaths));
@@ -532,7 +539,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(result.data.ready, false);
       assert.strictEqual(result.data.needsChromeRestart, true);
       assert.strictEqual(result.data.restoreUrl, DEFAULT_SETUP_URL);
-      assert.match(String(result.data.chromeCommand), /https:\/\/example\.com\//);
+      assert.match(String(result.data.chromeCommand), /https:\/\/api\.ipify\.org\//);
       assert.match(String(result.data.next), /npx aluvia-cli setup/);
       assert.ok(!String(result.data.next).includes('--url'));
       assert.ok(typeof readProxyJson()?.attach.expectConnectAfter === 'number');
@@ -739,8 +746,8 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(getStoredConnectionId(), readProxyJson()?.connectionId ?? undefined);
     });
 
-    test('aimed stays true when the tunnel probe sees the datacenter IP; ready is false', async () => {
-      process.env.ALUVIA_DATACENTER_IP = '172.59.0.1';
+    test('aimed stays true when exit IP matches direct IP; ready is false', async () => {
+      process.env.ALUVIA_DATACENTER_IP = MOCK_EGRESS_IP;
       await startDaemon();
       process.env.ALUVIA_ATTACH_WAIT_MS = '2000';
       const pending = captureOutput(() => handleProxy(setupArgs(dataPort, controlPort)));
@@ -751,6 +758,10 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(result.data.status, 'verified');
       assert.strictEqual(result.data.aimed, true);
       assert.strictEqual(result.data.ready, false);
+      assert.strictEqual(result.data.exitIp, MOCK_EGRESS_IP);
+      assert.strictEqual(result.data.directIp, MOCK_EGRESS_IP);
+      assert.strictEqual(result.data.sameAsDirect, true);
+      assert.match(String(result.data.next), /matches this VM's direct IP/);
     });
 
     test('attach is an unknown command', async () => {
@@ -788,6 +799,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
       process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
       process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
+      process.env.ALUVIA_DATACENTER_IP = LAB_DIRECT_IP;
       delete process.env.ALUVIA_PROXY_PORT;
       delete process.env.ALUVIA_PROXY_CONTROL_PORT;
       delete process.env.ALUVIA_ATTACH_WAIT_MS;
@@ -890,6 +902,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
       process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
       process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
+      process.env.ALUVIA_DATACENTER_IP = LAB_DIRECT_IP;
       delete process.env.ALUVIA_PROXY_PORT;
       delete process.env.ALUVIA_PROXY_CONTROL_PORT;
       delete process.env.ALUVIA_ATTACH_WAIT_MS;
@@ -977,6 +990,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
       process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
       process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
+      process.env.ALUVIA_DATACENTER_IP = LAB_DIRECT_IP;
       delete process.env.ALUVIA_PROXY_PORT;
       delete process.env.ALUVIA_PROXY_CONTROL_PORT;
       delete process.env.ALUVIA_ATTACH_WAIT_MS;

@@ -51,7 +51,7 @@ Node.js 18+. If `aluvia` is not on PATH, replace `aluvia` with `npx aluvia-cli`.
 npx aluvia-cli setup
 ```
 
-Run this on the machine where the agent's browser runs. No target page URL is required. When Chrome needs configuration, setup restarts it with proxy settings and opens `https://example.com/`, a small HTTPS test page. `--url <page>` is optional: supply it to open a specific page instead. Setup enables proxy traffic and checks the upstream connection before reporting `ready: true`.
+Run this on the machine where the agent's browser runs. No target page URL is required. When Chrome needs configuration, setup restarts it with proxy settings and opens `https://api.ipify.org/`, which shows the proxied exit IP. `--url <page>` is optional: supply it to open a specific page instead. Setup enables proxy traffic and checks that the proxied IP differs from this VM's direct IP before reporting `ready: true`.
 
 That starts the daemon, aims Chrome at `127.0.0.1:18787`, and copies the [agent skill](./skills/aluvia/SKILL.md) into the skill dirs on this machine.
 
@@ -72,7 +72,7 @@ Read the JSON. **`next` is the next action.**
 | Field | Meaning |
 | --- | --- |
 | `aimed: true` | Chrome CONNECTed to the local proxy. Idle tabs stay aimed. |
-| `ready: true` | Aimed, healthy, daemon live, and the Aluvia tunnel CONNECT returned 200 with an egress IP that is not this VM datacenter. Distinct from `aimed`. Reload the blocked tab. |
+| `ready: true` | Aimed, healthy, daemon live, and `exitIp` (through `127.0.0.1:18787`) differs from `directIp` (this VM, no proxy). Distinct from `aimed`. Reload the blocked tab. |
 | `needsChromeRestart: true` | Run `chromeCommand` (quits Chrome first, then launches with flags). Then run `aluvia setup` again. Launching without quitting ignores flags. |
 | `code: "payment_required"` | Trial data is used up. Show the human `claim_url`, then run `aluvia auth login`. |
 

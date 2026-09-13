@@ -23,6 +23,7 @@ const ENV_KEYS = [
   'ALUVIA_PROBE_URL',
   'ALUVIA_PROBE_RETRY_DELAY_MS',
   'ALUVIA_PROBE_RETRY_ATTEMPTS',
+  'ALUVIA_DATACENTER_IP',
 ] as const;
 
 const DATA_PORT_UNHEALTHY = 'proxyd data port is not healthy. Run `aluvia status`.';
@@ -66,6 +67,7 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
     process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
     process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
+    process.env.ALUVIA_DATACENTER_IP = '203.0.113.1';
     delete process.env.ALUVIA_PROXY_PORT;
     delete process.env.ALUVIA_PROXY_CONTROL_PORT;
     const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));
@@ -209,6 +211,9 @@ describe('proxy-on / proxy-off / rotate-ip', { concurrency: 1 }, () => {
     assert.strictEqual(rotated.data.connectionId, status.data.connectionId);
     assert.strictEqual(rotated.data.rotated, true);
     assert.strictEqual(rotated.data.ready, true);
+    assert.strictEqual(rotated.data.exitIp, MOCK_EGRESS_IP);
+    assert.strictEqual(rotated.data.directIp, '203.0.113.1');
+    assert.strictEqual(rotated.data.sameAsDirect, false);
     assert.strictEqual(api.state.session_id, sessionId);
     assert.strictEqual(api.state.session_id, readProxyJson()?.sessionId);
   });
@@ -375,6 +380,7 @@ describe('rotate-ip waits for a successful tunnel probe', { concurrency: 1 }, ()
     process.env.ALUVIA_PROBE_URL = `https://${MOCK_EGRESS_IP}/`;
     process.env.ALUVIA_PROBE_RETRY_DELAY_MS = '20';
     process.env.ALUVIA_PROBE_RETRY_ATTEMPTS = '3';
+    process.env.ALUVIA_DATACENTER_IP = '203.0.113.1';
     delete process.env.ALUVIA_PROXY_PORT;
     delete process.env.ALUVIA_PROXY_CONTROL_PORT;
     const started = await captureOutput(() => handleProxy(startArgs(dataPort, controlPort)));

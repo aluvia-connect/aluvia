@@ -228,8 +228,7 @@ test('only successful Aluvia CONNECT qualifies, excluding all probes, HTTP, dire
     { hostname: 'api.ipify.org' },
     { hostname: 'ifconfig.me' },
     { hostname: 'icanhazip.com' },
-    { hostname: 'example.com' },
-    { hostname: 'EXAMPLE.COM.' },
+    { hostname: 'API.IPIFY.ORG.' },
     { viaUpstream: false },
     { isHttp: true },
     { connectOk: false },
@@ -334,7 +333,7 @@ test('concurrent processes publish one original event; restart after lost ack re
         fileURLToPath(new URL('./helpers/growth-attribution-process.ts', import.meta.url)),
         mode,
       ],
-      { env: { ...process.env, ALUVIA_HOME: home }, timeout: 5000 },
+      { env: { ...process.env, ALUVIA_HOME: home, NODE_NO_WARNINGS: '1' }, timeout: 5000 },
     );
     assert.equal(stderr, '');
     return stdout
