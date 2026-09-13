@@ -229,6 +229,8 @@ test('only successful Aluvia CONNECT qualifies, excluding all probes, HTTP, dire
     { hostname: 'ifconfig.me' },
     { hostname: 'icanhazip.com' },
     { hostname: 'API.IPIFY.ORG.' },
+    { hostname: 'aluvia-ip.aluvia.workers.dev' },
+    { hostname: 'ALUVIA-IP.ALUVIA.WORKERS.DEV.' },
     { viaUpstream: false },
     { isHttp: true },
     { connectOk: false },

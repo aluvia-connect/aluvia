@@ -15,7 +15,7 @@ The new behavior:
 - The initial command remains exactly `npx aluvia-cli setup`. A target page URL is no longer required.
 - Run it on the machine where the agent's Chrome or Chromium browser runs. Node.js 18 or later and a usable local browser runtime are required.
 - Setup installs the command launcher and agent skill, starts the local proxy, configures the browser, enables proxy traffic, and checks the upstream connection.
-- Initial configuration can restart Chrome. When a restart is needed and no URL was supplied, setup opens `https://api.ipify.org/`, which shows the proxied exit IP. Optional `--url <page>` opens a specific page instead. Do not add it to the primary setup command or imply that users need to find a page URL.
+- Initial configuration can restart Chrome. When a restart is needed and no URL was supplied, setup opens `https://aluvia-ip.aluvia.workers.dev/`, which shows the proxied exit IP. Optional `--url <page>` opens a specific page instead. Do not add it to the primary setup command or imply that users need to find a page URL.
 - A working setup can be run again without restarting the browser or changing a live proxy session. It checks the connection again and enables proxy traffic.
 - On Linux, the CLI retains the discovered browser's launch settings, including its profile and TCP debugging port. It asks Chrome to close cleanly through an existing debugging connection when available. Do not promise lossless state preservation across every browser platform or automation runtime.
 - `ready: true` means Chrome is aimed, the daemon is healthy, and the proxied exit IP differs from this VM's direct IP. It is not proof that a target website will allow access or that an agent task succeeded.

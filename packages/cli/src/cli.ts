@@ -45,7 +45,7 @@ export function buildHelpJson(): {
           {
             flag: '--url <url>',
             description:
-              'Optional. Open this page after the Chrome restart. Without it, setup opens https://api.ipify.org/ so the tab shows the proxied exit IP.',
+              'Optional. Open this page after the Chrome restart. Without it, setup opens https://aluvia-ip.aluvia.workers.dev/ so the tab shows the proxied exit IP.',
           },
         ],
       },
