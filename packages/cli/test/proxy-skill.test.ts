@@ -51,7 +51,7 @@ describe('proxy skill install', () => {
     assert.ok(body.includes('aluvia setup'));
     assert.ok(body.includes('--url'));
     assert.ok(body.includes('`--url <page>` is optional'));
-    assert.ok(body.includes('https://api.ipify.org/'));
+    assert.ok(body.includes('https://aluvia-ip.aluvia.workers.dev/'));
     assert.ok(body.includes('exitIp'));
     assert.ok(body.includes('directIp'));
     assert.ok(!body.includes('required when Chrome is not already aimed'));

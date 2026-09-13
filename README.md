@@ -51,7 +51,7 @@ Node.js 18+. If `aluvia` is not on PATH, replace `aluvia` with `npx aluvia-cli`.
 npx aluvia-cli setup
 ```
 
-Run this on the machine where the agent's browser runs. No target page URL is required. When Chrome needs configuration, setup restarts it with proxy settings and opens `https://api.ipify.org/`, which shows the proxied exit IP. `--url <page>` is optional: supply it to open a specific page instead. Setup enables proxy traffic and checks that the proxied IP differs from this VM's direct IP before reporting `ready: true`.
+Run this on the machine where the agent's browser runs. No target page URL is required. When Chrome needs configuration, setup restarts it with proxy settings and opens `https://aluvia-ip.aluvia.workers.dev/`, which shows the proxied exit IP. `--url <page>` is optional: supply it to open a specific page instead. Setup enables proxy traffic and checks that the proxied IP differs from this VM's direct IP before reporting `ready: true`.
 
 That starts the daemon, aims Chrome at `127.0.0.1:18787`, and copies the [agent skill](./skills/aluvia/SKILL.md) into the skill dirs on this machine.
 

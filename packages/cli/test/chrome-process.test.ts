@@ -11,9 +11,9 @@ test('bare launch opens the HTTPS test page and an explicit URL takes its place'
   const args = chromeLaunchArgs(18787);
   assert.ok(args.includes('--proxy-server=http://127.0.0.1:18787'));
   assert.ok(args.includes('--restore-last-session'));
-  assert.equal(DEFAULT_SETUP_URL, 'https://api.ipify.org/');
+  assert.equal(DEFAULT_SETUP_URL, 'https://aluvia-ip.aluvia.workers.dev/');
   assert.equal(args.at(-1), DEFAULT_SETUP_URL);
-  assert.equal(isSetupPageHostname('api.ipify.org'), true);
+  assert.equal(isSetupPageHostname('aluvia-ip.aluvia.workers.dev'), true);
   assert.equal(isSetupPageHostname('example.com'), false);
   const explicit = chromeLaunchArgs(18787, 'https://shop.example/cart');
   assert.equal(explicit.at(-1), 'https://shop.example/cart');

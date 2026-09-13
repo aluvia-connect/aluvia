@@ -37,7 +37,7 @@ Cloudflare, CAPTCHA, Access Denied, unusual traffic, or a hard 403 on a page tha
 npx aluvia-cli setup
 ```
 
-Run this on the machine where the agent's browser runs. `--url <page>` is optional. Without it, setup opens `https://api.ipify.org/`, which shows the proxied exit IP, after the restart. If you supply a page URL, Chrome opens that page instead. Setup enables proxy traffic and checks the connection. No account or page URL is needed to start the free trial.
+Run this on the machine where the agent's browser runs. `--url <page>` is optional. Without it, setup opens `https://aluvia-ip.aluvia.workers.dev/`, which shows the proxied exit IP, after the restart. If you supply a page URL, Chrome opens that page instead. Setup enables proxy traffic and checks the connection. No account or page URL is needed to start the free trial.
 
 Read the JSON. **`next` is the next action.**
 

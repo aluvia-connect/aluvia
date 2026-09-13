@@ -46,7 +46,7 @@ describe('proxy help', () => {
       | undefined;
     assert.ok(typeof urlOpt?.description === 'string');
     assert.ok(urlOpt.description.toLowerCase().includes('optional'));
-    assert.match(urlOpt.description, /https:\/\/api\.ipify\.org\//);
+    assert.match(urlOpt.description, /https:\/\/aluvia-ip\.aluvia\.workers\.dev\//);
     assert.deepStrictEqual(start?.options, []);
   });
 

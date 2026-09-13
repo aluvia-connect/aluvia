@@ -539,7 +539,7 @@ describe('proxy attach file', { concurrency: 1 }, () => {
       assert.strictEqual(result.data.ready, false);
       assert.strictEqual(result.data.needsChromeRestart, true);
       assert.strictEqual(result.data.restoreUrl, DEFAULT_SETUP_URL);
-      assert.match(String(result.data.chromeCommand), /https:\/\/api\.ipify\.org\//);
+      assert.match(String(result.data.chromeCommand), /https:\/\/aluvia-ip\.aluvia\.workers\.dev\//);
       assert.match(String(result.data.next), /npx aluvia-cli setup/);
       assert.ok(!String(result.data.next).includes('--url'));
       assert.ok(typeof readProxyJson()?.attach.expectConnectAfter === 'number');

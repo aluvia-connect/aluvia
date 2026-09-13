@@ -410,10 +410,11 @@ describe('fetchDirectIp', { concurrency: 1 }, () => {
 });
 
 describe('default setup page', () => {
-  test('bare setup opens ipify so the tab shows the exit IP', () => {
-    assert.strictEqual(DEFAULT_SETUP_URL, 'https://api.ipify.org/');
-    assert.strictEqual(isSetupPageHostname('api.ipify.org'), true);
-    assert.strictEqual(isSetupPageHostname('API.IPIFY.ORG.'), true);
+  test('bare setup opens the Aluvia IP worker so the tab shows the exit IP', () => {
+    assert.strictEqual(DEFAULT_SETUP_URL, 'https://aluvia-ip.aluvia.workers.dev/');
+    assert.strictEqual(isSetupPageHostname('aluvia-ip.aluvia.workers.dev'), true);
+    assert.strictEqual(isSetupPageHostname('ALUVIA-IP.ALUVIA.WORKERS.DEV.'), true);
+    assert.strictEqual(isSetupPageHostname('api.ipify.org'), false);
     assert.strictEqual(isSetupPageHostname('example.com'), false);
   });
 });
